@@ -75,6 +75,11 @@ function formatServicePrice(price: number | null | undefined) {
   return moneyFormatter.format(Number(price))
 }
 
+function getScheduleBlockHeight(booking: Booking) {
+  const duration = getDurationMinutes(booking)
+  return Math.min(260, Math.max(150, duration * 1.8))
+}
+
 export default function AdminPage() {
   const [password, setPassword] = useState('')
   const [authenticated, setAuthenticated] = useState(false)
@@ -418,6 +423,7 @@ function TodaySchedule({
                 booking={booking}
                 updating={updatingId === booking.id}
                 onUpdateStatus={onUpdateStatus}
+                minHeight={getScheduleBlockHeight(booking)}
               />
             </div>
           </div>
@@ -457,10 +463,12 @@ function BookingCard({
   booking,
   updating,
   onUpdateStatus,
+  minHeight,
 }: {
   booking: Booking
   updating: boolean
   onUpdateStatus: (id: string, status: Booking['status']) => void
+  minHeight?: number
 }) {
   const addons = getAddons(booking)
   const start = parseISO(booking.start_time)
@@ -469,8 +477,11 @@ function BookingCard({
   const primaryService = booking.booking_services?.find((service) => service.is_primary)
 
   return (
-    <article className="rounded-3xl border border-white bg-white p-5 shadow-[0_12px_40px_rgba(44,44,44,0.05)] transition hover:-translate-y-0.5 hover:shadow-[0_20px_60px_rgba(44,44,44,0.08)]">
-      <div className="grid gap-5 lg:grid-cols-[1.1fr_1fr_auto] lg:items-center">
+    <article
+      className="rounded-3xl border border-white bg-white p-5 shadow-[0_12px_40px_rgba(44,44,44,0.05)] transition hover:-translate-y-0.5 hover:shadow-[0_20px_60px_rgba(44,44,44,0.08)]"
+      style={minHeight ? { minHeight } : undefined}
+    >
+      <div className="grid h-full gap-5 lg:grid-cols-[1.1fr_1fr_auto] lg:items-center">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-3">
             <h2 className="truncate text-lg font-semibold text-brand-text">{booking.client_name}</h2>
