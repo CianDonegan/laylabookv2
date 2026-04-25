@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
-import { format, parseISO } from 'date-fns'
+import { differenceInMinutes, format, parseISO } from 'date-fns'
 import type { Booking } from '../types'
 
 const ADMIN_PASSWORD = 'layla2026'
@@ -51,11 +51,28 @@ function getPrimaryService(booking: Booking) {
 }
 
 function getAddons(booking: Booking) {
-  return booking.booking_services?.filter((service) => !service.is_primary).map((service) => service.name_at_booking) || []
+  return booking.booking_services?.filter((service) => !service.is_primary) || []
 }
 
 function isActiveBooking(booking: Booking) {
   return booking.status === 'pending' || booking.status === 'confirmed'
+}
+
+function getDurationMinutes(booking: Booking) {
+  return Math.max(0, differenceInMinutes(parseISO(booking.end_time), parseISO(booking.start_time)))
+}
+
+function formatDuration(minutes: number) {
+  if (minutes < 60) return `${minutes} min`
+
+  const hours = Math.floor(minutes / 60)
+  const remainder = minutes % 60
+  return remainder ? `${hours}h ${remainder}m` : `${hours}h`
+}
+
+function formatServicePrice(price: number | null | undefined) {
+  if (price === null || price === undefined) return ''
+  return moneyFormatter.format(Number(price))
 }
 
 export default function AdminPage() {
@@ -75,7 +92,7 @@ export default function AdminPage() {
 
     let query = supabase
       .from('bookings')
-      .select('*, booking_services(name_at_booking, is_primary)')
+      .select('*, booking_services(name_at_booking, is_primary, price_at_booking)')
       .order('start_time', { ascending: true })
 
     if (nextFilter === 'today') {
@@ -150,6 +167,20 @@ export default function AdminPage() {
       revenue,
     }
   }, [bookings])
+
+  const todaySummary = useMemo(() => {
+    const activeBookings = visibleBookings.filter(isActiveBooking)
+    const totalBookedMinutes = activeBookings.reduce((sum, booking) => sum + getDurationMinutes(booking), 0)
+
+    return {
+      firstAppointment: visibleBookings[0] ? format(parseISO(visibleBookings[0].start_time), 'HH:mm') : 'None',
+      lastAppointment: visibleBookings[visibleBookings.length - 1]
+        ? format(parseISO(visibleBookings[visibleBookings.length - 1].end_time), 'HH:mm')
+        : 'None',
+      totalBookedTime: formatDuration(totalBookedMinutes),
+      activeCount: activeBookings.length,
+    }
+  }, [visibleBookings])
 
   if (!authenticated) {
     return (
@@ -302,19 +333,112 @@ export default function AdminPage() {
               </p>
             </div>
           ) : (
-            <div className="grid gap-3">
-              {visibleBookings.map((booking) => (
-                <BookingCard
-                  key={booking.id}
-                  booking={booking}
-                  updating={updatingId === booking.id}
+            <>
+              {filter === 'today' && <TodaySummary summary={todaySummary} />}
+              {filter === 'today' ? (
+                <TodaySchedule
+                  bookings={visibleBookings}
+                  updatingId={updatingId}
                   onUpdateStatus={updateStatus}
                 />
-              ))}
-            </div>
+              ) : (
+                <div className="grid gap-3">
+                  {visibleBookings.map((booking) => (
+                    <BookingCard
+                      key={booking.id}
+                      booking={booking}
+                      updating={updatingId === booking.id}
+                      onUpdateStatus={updateStatus}
+                    />
+                  ))}
+                </div>
+              )}
+            </>
           )}
         </section>
       </main>
+    </div>
+  )
+}
+
+function TodaySummary({
+  summary,
+}: {
+  summary: {
+    firstAppointment: string
+    lastAppointment: string
+    totalBookedTime: string
+    activeCount: number
+  }
+}) {
+  return (
+    <div className="mb-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <ScheduleStat label="First appointment" value={summary.firstAppointment} />
+      <ScheduleStat label="Last appointment" value={summary.lastAppointment} />
+      <ScheduleStat label="Booked time" value={summary.totalBookedTime} />
+      <ScheduleStat label="Pending/confirmed" value={summary.activeCount} />
+    </div>
+  )
+}
+
+function ScheduleStat({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div className="rounded-2xl border border-white bg-white px-4 py-3 shadow-[0_10px_30px_rgba(44,44,44,0.04)]">
+      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-brand-muted">{label}</p>
+      <p className="mt-1 text-lg font-semibold text-brand-text">{value}</p>
+    </div>
+  )
+}
+
+function TodaySchedule({
+  bookings,
+  updatingId,
+  onUpdateStatus,
+}: {
+  bookings: Booking[]
+  updatingId: string | null
+  onUpdateStatus: (id: string, status: Booking['status']) => void
+}) {
+  return (
+    <div className="grid gap-3">
+      {bookings.map((booking, index) => {
+        const previous = bookings[index - 1]
+        const gap = previous ? differenceInMinutes(parseISO(booking.start_time), parseISO(previous.end_time)) : 0
+
+        return (
+          <div key={booking.id}>
+            {gap > 0 && <GapIndicator minutes={gap} />}
+            {gap < 0 && <GapIndicator minutes={Math.abs(gap)} overlap />}
+            <div className="grid gap-3 lg:grid-cols-[5rem_minmax(0,1fr)] lg:items-start">
+              <div className="hidden pt-5 text-right lg:block">
+                <p className="text-lg font-semibold text-brand-text">{format(parseISO(booking.start_time), 'HH:mm')}</p>
+                <p className="text-xs font-medium text-brand-muted">{format(parseISO(booking.end_time), 'HH:mm')}</p>
+              </div>
+              <BookingCard
+                booking={booking}
+                updating={updatingId === booking.id}
+                onUpdateStatus={onUpdateStatus}
+              />
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function GapIndicator({ minutes, overlap = false }: { minutes: number; overlap?: boolean }) {
+  return (
+    <div className="my-2 flex items-center gap-3 lg:ml-20">
+      <div className="h-px flex-1 bg-brand-border" />
+      <span
+        className={`rounded-full px-3 py-1 text-xs font-semibold ${
+          overlap ? 'bg-rose-50 text-rose-700' : 'bg-brand-sage-light text-brand-sage'
+        }`}
+      >
+        {formatDuration(minutes)} {overlap ? 'overlap' : 'gap'}
+      </span>
+      <div className="h-px flex-1 bg-brand-border" />
     </div>
   )
 }
@@ -341,6 +465,8 @@ function BookingCard({
   const addons = getAddons(booking)
   const start = parseISO(booking.start_time)
   const end = parseISO(booking.end_time)
+  const duration = getDurationMinutes(booking)
+  const primaryService = booking.booking_services?.find((service) => service.is_primary)
 
   return (
     <article className="rounded-3xl border border-white bg-white p-5 shadow-[0_12px_40px_rgba(44,44,44,0.05)] transition hover:-translate-y-0.5 hover:shadow-[0_20px_60px_rgba(44,44,44,0.08)]">
@@ -358,19 +484,43 @@ function BookingCard({
           {booking.notes && <p className="mt-3 text-sm leading-6 text-brand-muted">{booking.notes}</p>}
         </div>
 
-        <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
           <Detail label="Date" value={format(start, 'EEE, d MMM')} />
-          <Detail label="Time" value={`${format(start, 'HH:mm')} - ${format(end, 'HH:mm')}`} />
+          <Detail label="Starts" value={format(start, 'HH:mm')} />
+          <Detail label="Ends" value={format(end, 'HH:mm')} />
+          <Detail label="Duration" value={formatDuration(duration)} />
           <Detail label="Total" value={moneyFormatter.format(Number(booking.total_price || 0))} />
         </div>
 
         <div className="lg:min-w-72">
           <div className="rounded-2xl bg-brand-bg p-4">
-            <p className="text-sm font-semibold text-brand-text">{getPrimaryService(booking)}</p>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-brand-muted">Primary service</p>
+                <p className="mt-1 text-sm font-semibold text-brand-text">{getPrimaryService(booking)}</p>
+              </div>
+              {primaryService && formatServicePrice(primaryService.price_at_booking) && (
+                <span className="text-sm font-semibold text-brand-sage">
+                  {formatServicePrice(primaryService.price_at_booking)}
+                </span>
+              )}
+            </div>
             {addons.length > 0 ? (
-              <p className="mt-1 text-xs leading-5 text-brand-muted">Add-ons: {addons.join(', ')}</p>
+              <div className="mt-3 border-t border-brand-border pt-3">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-brand-muted">Add-ons</p>
+                <div className="grid gap-1.5">
+                  {addons.map((addon) => (
+                    <div key={`${booking.id}-${addon.name_at_booking}`} className="flex justify-between gap-3 text-xs">
+                      <span className="leading-5 text-brand-text">{addon.name_at_booking}</span>
+                      {formatServicePrice(addon.price_at_booking) && (
+                        <span className="font-semibold text-brand-sage">{formatServicePrice(addon.price_at_booking)}</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
             ) : (
-              <p className="mt-1 text-xs text-brand-muted">No add-ons selected</p>
+              <p className="mt-3 border-t border-brand-border pt-3 text-xs text-brand-muted">No add-ons selected</p>
             )}
           </div>
 
