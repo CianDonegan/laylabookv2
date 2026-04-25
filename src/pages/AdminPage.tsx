@@ -1,6 +1,18 @@
 import { useState, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
-import { addDays, differenceInMinutes, format, parseISO } from 'date-fns'
+import {
+  addDays,
+  addMonths,
+  differenceInMinutes,
+  eachDayOfInterval,
+  endOfMonth,
+  endOfWeek,
+  format,
+  isSameMonth,
+  parseISO,
+  startOfMonth,
+  startOfWeek,
+} from 'date-fns'
 import type { Booking } from '../types'
 
 const ADMIN_PASSWORD = 'layla2026'
@@ -117,6 +129,10 @@ export default function AdminPage() {
     } else if (nextView === 'week') {
       const start = getLocalDayStart()
       const end = addDays(start, 7)
+      query = query.gte('start_time', start.toISOString()).lt('start_time', end.toISOString())
+    } else if (nextView === 'month') {
+      const start = startOfMonth(getLocalDayStart())
+      const end = addMonths(start, 1)
       query = query.gte('start_time', start.toISOString()).lt('start_time', end.toISOString())
     }
 
@@ -356,10 +372,7 @@ export default function AdminPage() {
           ) : view === 'week' ? (
             <WeekView bookings={visibleBookings} />
           ) : view === 'month' ? (
-            <ViewPlaceholder
-              title="Month view"
-              message="The next phase will turn this into a monthly booking and revenue overview."
-            />
+            <MonthView bookings={visibleBookings} />
           ) : visibleBookings.length === 0 ? (
             <div className="rounded-3xl border border-dashed border-brand-border bg-white px-6 py-14 text-center">
               <h2 className="text-xl font-semibold text-brand-text">No bookings found</h2>
@@ -412,15 +425,6 @@ function TodaySummary({
       <ScheduleStat label="Last appointment" value={summary.lastAppointment} />
       <ScheduleStat label="Booked time" value={summary.totalBookedTime} />
       <ScheduleStat label="Pending/confirmed" value={summary.activeCount} />
-    </div>
-  )
-}
-
-function ViewPlaceholder({ title, message }: { title: string; message: string }) {
-  return (
-    <div className="rounded-3xl border border-dashed border-brand-border bg-white px-6 py-14 text-center">
-      <h2 className="text-xl font-semibold text-brand-text">{title}</h2>
-      <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-brand-muted">{message}</p>
     </div>
   )
 }
@@ -491,6 +495,83 @@ function WeekBookingRow({ booking }: { booking: Booking }) {
         </span>
       </div>
     </div>
+  )
+}
+
+const monthWeekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+
+function MonthView({ bookings }: { bookings: Booking[] }) {
+  const todayKey = getLocalDateKey(new Date())
+  const monthStart = startOfMonth(getLocalDayStart())
+  const monthEnd = endOfMonth(monthStart)
+  const gridStart = startOfWeek(monthStart, { weekStartsOn: 1 })
+  const gridEnd = endOfWeek(monthEnd, { weekStartsOn: 1 })
+  const days = eachDayOfInterval({ start: gridStart, end: gridEnd })
+
+  const bookingsByDay = bookings.reduce<Record<string, Booking[]>>((groups, booking) => {
+    const key = getLocalDateKey(parseISO(booking.start_time))
+    groups[key] = [...(groups[key] || []), booking]
+    return groups
+  }, {})
+
+  return (
+    <section className="rounded-3xl border border-white bg-white p-5 shadow-[0_12px_40px_rgba(44,44,44,0.05)]">
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-xl font-semibold text-brand-text">{format(monthStart, 'MMMM yyyy')}</h2>
+          <p className="mt-1 text-sm text-brand-muted">Monthly booking count and active revenue.</p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-7 border-b border-brand-border pb-2">
+        {monthWeekdays.map((day) => (
+          <div key={day} className="text-center text-xs font-semibold uppercase tracking-[0.12em] text-brand-muted">
+            {day}
+          </div>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-7 gap-px overflow-hidden rounded-2xl bg-brand-border">
+        {days.map((day) => {
+          const key = getLocalDateKey(day)
+          const dayBookings = bookingsByDay[key] || []
+          const activeBookings = dayBookings.filter(isActiveBooking)
+          const revenue = activeBookings.reduce((sum, booking) => sum + Number(booking.total_price || 0), 0)
+          const inMonth = isSameMonth(day, monthStart)
+          const isToday = key === todayKey
+
+          return (
+            <div
+              key={key}
+              className={`min-h-28 bg-white p-3 ${inMonth ? '' : 'opacity-45'} ${
+                isToday ? 'ring-2 ring-inset ring-brand-sage' : ''
+              }`}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span
+                  className={`flex h-7 w-7 items-center justify-center rounded-full text-sm font-semibold ${
+                    isToday ? 'bg-brand-sage text-white' : 'text-brand-text'
+                  }`}
+                >
+                  {format(day, 'd')}
+                </span>
+              </div>
+
+              {dayBookings.length > 0 ? (
+                <div className="mt-4 space-y-1">
+                  <p className="text-xs font-semibold text-brand-text">
+                    {dayBookings.length} {dayBookings.length === 1 ? 'booking' : 'bookings'}
+                  </p>
+                  <p className="text-xs font-semibold text-brand-sage">{moneyFormatter.format(revenue)}</p>
+                </div>
+              ) : (
+                <p className="mt-4 text-xs text-brand-muted">No bookings</p>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </section>
   )
 }
 
