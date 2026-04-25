@@ -7,7 +7,7 @@ const POLICIES: [string, string][] = [
   ['Cancellations', '24 hours notice required for all cancellations.'],
   ['Confirmations', 'A confirmation text will be sent within 24 hours.'],
   ['No-Shows', 'Clients who do not attend without notice will be unable to book future appointments.'],
-  ['Patch Testing', 'Required for waxing and tinting services — please schedule in advance.'],
+  ['Patch Testing', 'Required for waxing and tinting services. Please schedule in advance.'],
   ['Media Consent', 'Photos or videos taken may be posted to social media. Let me know if you do not consent.'],
   ['Location', 'Clondalkin, D22.'],
   ['Entry Protocol', 'Text when you arrive outside and I will come to let you in.'],
@@ -30,7 +30,7 @@ export default function PolicyCard({ onAccept }: PolicyCardProps) {
       <div className="px-6 pt-6 pb-2">
         <h2 className="text-sm font-semibold mb-3 text-brand-text">Booking Policy</h2>
         <p className="text-xs leading-relaxed mb-4 text-brand-muted">
-          Thank you for choosing BeautyByLayla. Please adhere to the following policies.
+          Thank you for choosing Beauty by Layla. Please read the policies before booking.
         </p>
         <div className="space-y-0 text-xs mb-4 text-brand-muted">
           {POLICIES.map(([title, text]) => (
@@ -51,7 +51,7 @@ export default function PolicyCard({ onAccept }: PolicyCardProps) {
             color: accepted ? '#a8b89a' : '#fff',
           }}
         >
-          {accepted ? '✓ Understood' : 'Okay'}
+          {accepted ? 'Understood' : 'I understand'}
         </button>
       </div>
     </div>

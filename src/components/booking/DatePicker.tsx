@@ -67,18 +67,20 @@ export default function DatePicker({ selectedDate, onSelect, isDateBlocked, minD
           <div className="flex items-center justify-between mb-4">
             <button
               onClick={prevMonth}
+              aria-label="Previous month"
               className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-gray-50 text-gray-400 text-lg"
             >
-              ‹
+              {'<'}
             </button>
             <span className="text-sm font-medium text-brand-text">
               {format(currentMonth, 'MMMM yyyy')}
             </span>
             <button
               onClick={nextMonth}
+              aria-label="Next month"
               className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-gray-50 text-gray-400 text-lg"
             >
-              ›
+              {'>'}
             </button>
           </div>
 

@@ -25,9 +25,9 @@ export default function BookingPage() {
   const [form, setForm] = useState({ name: '', phone: '' })
   const [submitted, setSubmitted] = useState(false)
 
-  const { services } = useServices()
-  const { hours: workingHours } = useWorkingHours()
-  const { dates: blockedDates } = useBlockedDates()
+  const { services, loading: servicesLoading, error: servicesError } = useServices()
+  const { hours: workingHours, loading: workingHoursLoading } = useWorkingHours()
+  const { dates: blockedDates, loading: blockedDatesLoading } = useBlockedDates()
 
   const primaryServices = useMemo(() => services.filter((s) => !s.is_addon), [services])
   const addonServices = useMemo(() => services.filter((s) => s.is_addon), [services])
@@ -49,8 +49,14 @@ export default function BookingPage() {
     }, 0)
   }, [primaryService, selectedAddons])
 
-  const { slots: availableSlots, loading: slotsLoading } = useAvailability(selectedDate, totalDuration)
+  const {
+    slots: availableSlots,
+    loading: slotsLoading,
+    error: slotsError,
+  } = useAvailability(selectedDate, totalDuration)
   const { submit: submitBooking, loading: submitting, error: bookingError } = useBooking()
+
+  const setupLoading = servicesLoading || workingHoursLoading || blockedDatesLoading
 
   const isDateBlocked = (dateStr: string) => {
     if (blockedDates.includes(dateStr)) return true
@@ -124,64 +130,99 @@ export default function BookingPage() {
     <div className="min-h-screen bg-brand-bg">
       <div className="max-w-2xl mx-auto px-4 pt-6 pb-12">
         <Hero />
-        <PolicyCard onAccept={() => {
-  setPolicyAccepted(true)
-  // Force a re-render by setting a dummy state or just rely on the conditional render
-}} />   
+        <PolicyCard onAccept={() => setPolicyAccepted(true)} />
 
         {policyAccepted && (
           <>
-            <ServicePicker
-              services={primaryServices}
-              selected={primaryService}
-              onSelect={handleSelectService}
-            />
-
-            <AddonPicker
-              addons={addonServices}
-              selectedAddons={selectedAddons}
-              primaryService={primaryService}
-              onToggle={handleToggleAddon}
-            />
-
-            {primaryService && (
-              <DatePicker
-                selectedDate={selectedDate}
-                onSelect={handleSelectDate}
-                isDateBlocked={isDateBlocked}
-                minDate={getLocalToday()}
+            {servicesError ? (
+              <FlowNotice
+                title="Services could not load"
+                message="Please refresh the page and try again."
+                tone="error"
               />
-            )}
+            ) : setupLoading ? (
+              <FlowNotice title="Preparing booking options" message="Loading services and availability..." />
+            ) : (
+              <>
+                <ServicePicker
+                  services={primaryServices}
+                  selected={primaryService}
+                  onSelect={handleSelectService}
+                />
 
-            {selectedDate && (
-              <TimeGrid
-                slots={availableSlots}
-                selectedTime={selectedTime}
-                onSelect={setSelectedTime}
-                loading={slotsLoading}
-              />
-            )}
+                <AddonPicker
+                  addons={addonServices}
+                  selectedAddons={selectedAddons}
+                  primaryService={primaryService}
+                  onToggle={handleToggleAddon}
+                />
 
-            {selectedTime && primaryService && (
-              <ClientForm
-                form={form}
-                onChange={setForm}
-                onSubmit={handleSubmit}
-                loading={submitting}
-                error={bookingError}
-                summary={{
-                  primaryService,
-                  addons: selectedAddons,
-                  dateLabel: format(parseISO(selectedDate), 'EEE, d MMM'),
-                  time: selectedTime,
-                  duration: totalDuration - (primaryService.buffer_minutes || 15),
-                  totalPrice: totalPrice.toFixed(2),
-                }}
-              />
+                {primaryService && (
+                  <DatePicker
+                    selectedDate={selectedDate}
+                    onSelect={handleSelectDate}
+                    isDateBlocked={isDateBlocked}
+                    minDate={getLocalToday()}
+                  />
+                )}
+
+                {selectedDate && (
+                  <TimeGrid
+                    slots={availableSlots}
+                    selectedTime={selectedTime}
+                    onSelect={setSelectedTime}
+                    loading={slotsLoading}
+                    error={slotsError}
+                  />
+                )}
+
+                {selectedTime && primaryService && (
+                  <ClientForm
+                    form={form}
+                    onChange={setForm}
+                    onSubmit={handleSubmit}
+                    loading={submitting}
+                    error={bookingError}
+                    summary={{
+                      primaryService,
+                      addons: selectedAddons,
+                      dateLabel: format(parseISO(selectedDate), 'EEE, d MMM'),
+                      time: selectedTime,
+                      duration: totalDuration - (primaryService.buffer_minutes || 15),
+                      totalPrice: totalPrice.toFixed(2),
+                    }}
+                  />
+                )}
+              </>
             )}
           </>
         )}
       </div>
+    </div>
+  )
+}
+
+function FlowNotice({
+  title,
+  message,
+  tone = 'neutral',
+}: {
+  title: string
+  message: string
+  tone?: 'neutral' | 'error'
+}) {
+  return (
+    <div
+      className={`mb-4 rounded-3xl border px-6 py-5 shadow-sm ${
+        tone === 'error'
+          ? 'border-red-100 bg-red-50 text-red-700'
+          : 'border-brand-border bg-white text-brand-text'
+      }`}
+    >
+      <h2 className="text-sm font-semibold">{title}</h2>
+      <p className={`mt-2 text-xs leading-relaxed ${tone === 'error' ? 'text-red-600' : 'text-brand-muted'}`}>
+        {message}
+      </p>
     </div>
   )
 }

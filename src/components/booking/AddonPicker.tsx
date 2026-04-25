@@ -36,6 +36,7 @@ export default function AddonPicker({ addons, selectedAddons, primaryService, on
             <button
               key={s.id}
               onClick={() => onToggle(s)}
+              aria-pressed={Boolean(selected)}
               className="w-full flex items-center justify-between px-6 py-3 text-left transition-colors border-b border-brand-border last:border-0"
               style={{ background: selected ? '#e8ede5' : 'white' }}
             >
@@ -48,12 +49,12 @@ export default function AddonPicker({ addons, selectedAddons, primaryService, on
                     color: 'white',
                   }}
                 >
-                  {selected ? '✓' : ''}
+                  {selected ? '' : ''}
                 </span>
                 <span className="text-sm text-brand-text">{s.name}</span>
               </div>
               <div>
-                <span className="text-sm font-medium text-brand-sage">+€{s.price}</span>
+                <span className="text-sm font-medium text-brand-sage">+EUR {s.price}</span>
                 <span className="text-xs ml-2 text-brand-muted">{s.duration_minutes}min</span>
               </div>
             </button>

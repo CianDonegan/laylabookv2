@@ -58,11 +58,17 @@ export default function ServicePicker({ services, selected, onSelect }: ServiceP
 
       {selected && (
         <div className="px-6 py-3 text-sm font-medium text-brand-sage">
-          {selected.name} — €{selected.price}
+          {selected.name} - EUR {selected.price}
         </div>
       )}
 
-      {!selected && (
+      {!selected && categorised.length === 0 && (
+        <p className="px-6 py-5 text-center text-xs text-brand-muted">
+          No services are available right now. Please try again later.
+        </p>
+      )}
+
+      {!selected && categorised.length > 0 && (
         <div>
           {categorised.map((cat) => (
             <div key={cat.label} className="border-b border-brand-border last:border-0">
@@ -72,7 +78,7 @@ export default function ServicePicker({ services, selected, onSelect }: ServiceP
               >
                 <span className="text-sm font-medium text-brand-text">{cat.label}</span>
                 <span className="text-brand-muted">
-                  {openCategory === cat.label ? '−' : '+'}
+                  {openCategory === cat.label ? '-' : '+'}
                 </span>
               </button>
               {openCategory === cat.label && (
@@ -85,7 +91,7 @@ export default function ServicePicker({ services, selected, onSelect }: ServiceP
                     >
                       <span className="text-sm text-brand-text">{s.name}</span>
                       <div>
-                        <span className="text-sm font-medium text-brand-sage">€{s.price}</span>
+                        <span className="text-sm font-medium text-brand-sage">EUR {s.price}</span>
                         <span className="text-xs ml-2 text-brand-muted">{s.duration_minutes}min</span>
                       </div>
                     </button>

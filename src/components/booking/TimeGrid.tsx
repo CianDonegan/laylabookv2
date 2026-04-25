@@ -3,9 +3,10 @@ interface TimeGridProps {
   selectedTime: string
   onSelect: (time: string) => void
   loading: boolean
+  error: string | null
 }
 
-export default function TimeGrid({ slots, selectedTime, onSelect, loading }: TimeGridProps) {
+export default function TimeGrid({ slots, selectedTime, onSelect, loading, error }: TimeGridProps) {
   if (loading) {
     return (
       <div className="bg-white rounded-3xl shadow-sm overflow-hidden mb-4 p-6">
@@ -15,6 +16,7 @@ export default function TimeGrid({ slots, selectedTime, onSelect, loading }: Tim
           </span>
           <h2 className="font-medium text-sm text-brand-text">Choose a time</h2>
         </div>
+        <p className="mb-4 text-xs text-brand-muted">Checking available appointment times...</p>
         <div className="grid grid-cols-4 gap-2 animate-pulse">
           {[...Array(8)].map((_, i) => (
             <div key={i} className="h-10 rounded-2xl bg-gray-100" />
@@ -46,7 +48,11 @@ export default function TimeGrid({ slots, selectedTime, onSelect, loading }: Tim
 
       {!selectedTime && (
         <div className="p-6 grid grid-cols-4 gap-2">
-          {slots.length === 0 ? (
+          {error ? (
+            <p className="col-span-4 text-center text-xs text-red-500 py-4">
+              Could not load times. Please choose the date again or refresh the page.
+            </p>
+          ) : slots.length === 0 ? (
             <p className="col-span-4 text-center text-xs text-brand-muted py-4">
               No available slots for this date.
             </p>

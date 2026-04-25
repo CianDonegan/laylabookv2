@@ -1,158 +1,444 @@
-import { useState, useEffect } from 'react'
+import { useState, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
 import { format, parseISO } from 'date-fns'
 import type { Booking } from '../types'
 
 const ADMIN_PASSWORD = 'layla2026'
 
+type DateFilter = 'today' | 'upcoming' | 'all'
+type StatusFilter = 'all' | Booking['status']
+
+const dateFilters: { value: DateFilter; label: string }[] = [
+  { value: 'today', label: 'Today' },
+  { value: 'upcoming', label: 'Upcoming' },
+  { value: 'all', label: 'All' },
+]
+
+const statusFilters: { value: StatusFilter; label: string }[] = [
+  { value: 'all', label: 'All statuses' },
+  { value: 'pending', label: 'Pending' },
+  { value: 'confirmed', label: 'Confirmed' },
+  { value: 'completed', label: 'Completed' },
+  { value: 'cancelled', label: 'Cancelled' },
+  { value: 'no_show', label: 'No-show' },
+]
+
+const statusStyles: Record<Booking['status'], string> = {
+  pending: 'bg-amber-100 text-amber-800 ring-amber-200',
+  confirmed: 'bg-emerald-100 text-emerald-800 ring-emerald-200',
+  completed: 'bg-blue-100 text-blue-800 ring-blue-200',
+  cancelled: 'bg-stone-100 text-stone-600 ring-stone-200',
+  no_show: 'bg-rose-100 text-rose-800 ring-rose-200',
+}
+
+const statusLabels: Record<Booking['status'], string> = {
+  pending: 'Pending',
+  confirmed: 'Confirmed',
+  completed: 'Completed',
+  cancelled: 'Cancelled',
+  no_show: 'No-show',
+}
+
+const moneyFormatter = new Intl.NumberFormat('en-IE', {
+  style: 'currency',
+  currency: 'EUR',
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 2,
+})
+
+function getPrimaryService(booking: Booking) {
+  return booking.booking_services?.find((service) => service.is_primary)?.name_at_booking || 'Booking'
+}
+
+function getAddons(booking: Booking) {
+  return booking.booking_services?.filter((service) => !service.is_primary).map((service) => service.name_at_booking) || []
+}
+
+function isActiveBooking(booking: Booking) {
+  return booking.status === 'pending' || booking.status === 'confirmed'
+}
+
 export default function AdminPage() {
   const [password, setPassword] = useState('')
   const [authenticated, setAuthenticated] = useState(false)
   const [bookings, setBookings] = useState<Booking[]>([])
   const [loading, setLoading] = useState(true)
-  const [filter, setFilter] = useState<'today' | 'upcoming' | 'all'>('today')
+  const [filter, setFilter] = useState<DateFilter>('today')
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
+  const [search, setSearch] = useState('')
+  const [errorMessage, setErrorMessage] = useState('')
+  const [updatingId, setUpdatingId] = useState<string | null>(null)
 
-  useEffect(() => {
-    if (!authenticated) return
-    fetchBookings()
-  }, [filter, authenticated])
-
-  async function fetchBookings() {
+  async function fetchBookings(nextFilter = filter) {
     setLoading(true)
+    setErrorMessage('')
+
     let query = supabase
       .from('bookings')
       .select('*, booking_services(name_at_booking, is_primary)')
       .order('start_time', { ascending: true })
 
-    if (filter === 'today') {
+    if (nextFilter === 'today') {
       const today = new Date().toISOString().split('T')[0]
       query = query.gte('start_time', `${today}T00:00:00`).lt('start_time', `${today}T23:59:59`)
-    } else if (filter === 'upcoming') {
+    } else if (nextFilter === 'upcoming') {
       query = query.gte('start_time', new Date().toISOString())
     }
 
-    const { data } = await query
-    setBookings((data as Booking[]) || [])
+    const { data, error } = await query
+
+    if (error) {
+      setErrorMessage('Could not load bookings. Please try again.')
+      setBookings([])
+    } else {
+      setBookings((data as Booking[]) || [])
+    }
+
     setLoading(false)
   }
 
-  const updateStatus = async (id: string, status: Booking['status']) => {
-    await supabase.from('bookings').update({ status }).eq('id', id)
-    fetchBookings()
+  const handleLogin = () => {
+    if (password === ADMIN_PASSWORD) {
+      setAuthenticated(true)
+      setPassword('')
+      void fetchBookings('today')
+      return
+    }
+
+    setErrorMessage('That password is not right.')
   }
+
+  const updateStatus = async (id: string, status: Booking['status']) => {
+    setUpdatingId(id)
+    setErrorMessage('')
+
+    const { error } = await supabase.from('bookings').update({ status }).eq('id', id)
+
+    if (error) {
+      setErrorMessage('Could not update this booking. Please try again.')
+      setUpdatingId(null)
+      return
+    }
+
+    await fetchBookings()
+    setUpdatingId(null)
+  }
+
+  const visibleBookings = useMemo(() => {
+    const normalizedSearch = search.trim().toLowerCase()
+
+    return bookings.filter((booking) => {
+      const matchesStatus = statusFilter === 'all' || booking.status === statusFilter
+      const matchesSearch =
+        !normalizedSearch ||
+        booking.client_name.toLowerCase().includes(normalizedSearch) ||
+        booking.client_phone.toLowerCase().includes(normalizedSearch) ||
+        getPrimaryService(booking).toLowerCase().includes(normalizedSearch)
+
+      return matchesStatus && matchesSearch
+    })
+  }, [bookings, search, statusFilter])
+
+  const stats = useMemo(() => {
+    const activeBookings = bookings.filter(isActiveBooking)
+    const revenue = activeBookings.reduce((sum, booking) => sum + Number(booking.total_price || 0), 0)
+
+    return {
+      total: bookings.length,
+      pending: bookings.filter((booking) => booking.status === 'pending').length,
+      confirmed: bookings.filter((booking) => booking.status === 'confirmed').length,
+      revenue,
+    }
+  }, [bookings])
 
   if (!authenticated) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-brand-bg">
-        <div className="bg-white rounded-3xl p-8 max-w-sm w-full shadow-sm">
-          <h2 className="text-lg font-medium mb-4 text-brand-text">Admin Access</h2>
-          <input
-            type="password"
-            placeholder="Password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && password === ADMIN_PASSWORD && setAuthenticated(true)}
-            className="w-full rounded-2xl px-4 py-3 text-sm border border-brand-border bg-brand-bg mb-3"
-          />
-          <button
-            onClick={() => password === ADMIN_PASSWORD && setAuthenticated(true)}
-            className="w-full py-3 rounded-2xl text-sm font-medium bg-brand-sage text-white"
-          >
-            Enter
-          </button>
+      <div className="min-h-screen bg-[#f7f8f4] px-4 py-8 text-brand-text">
+        <div className="mx-auto flex min-h-[calc(100vh-4rem)] max-w-6xl items-center justify-center">
+          <div className="w-full max-w-md rounded-[2rem] border border-white/80 bg-white p-8 shadow-[0_24px_80px_rgba(44,44,44,0.10)]">
+            <div className="mb-8">
+              <p className="mb-3 text-xs font-semibold uppercase tracking-[0.24em] text-brand-sage">
+                Private dashboard
+              </p>
+              <h1 className="text-3xl font-semibold text-brand-text">Admin Access</h1>
+              <p className="mt-3 text-sm leading-6 text-brand-muted">
+                Sign in to manage bookings, confirmations, and client appointments.
+              </p>
+            </div>
+
+            <div className="space-y-3">
+              <label className="block text-sm font-medium text-brand-text" htmlFor="admin-password">
+                Password
+              </label>
+              <input
+                id="admin-password"
+                type="password"
+                placeholder="Enter password"
+                value={password}
+                onChange={(event) => {
+                  setPassword(event.target.value)
+                  setErrorMessage('')
+                }}
+                onKeyDown={(event) => event.key === 'Enter' && handleLogin()}
+                className="w-full rounded-2xl border border-brand-border bg-brand-bg px-4 py-3 text-sm text-brand-text outline-none transition focus:border-brand-sage focus:ring-4 focus:ring-brand-sage-light"
+              />
+              {errorMessage && <p className="text-sm text-rose-600">{errorMessage}</p>}
+              <button
+                onClick={handleLogin}
+                className="w-full rounded-2xl bg-brand-text px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-black focus:outline-none focus:ring-4 focus:ring-brand-sage-light"
+              >
+                Enter Dashboard
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen bg-brand-bg p-6">
-      <div className="max-w-4xl mx-auto">
-        <h1 className="text-2xl font-semibold mb-6 text-brand-text">Layla's Dashboard</h1>
+    <div className="min-h-screen bg-[#f7f8f4] text-brand-text">
+      <header className="border-b border-brand-border/80 bg-white/85 backdrop-blur">
+        <div className="mx-auto flex max-w-7xl flex-col gap-5 px-4 py-6 sm:px-6 lg:flex-row lg:items-center lg:justify-between lg:px-8">
+          <div>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-[0.24em] text-brand-sage">
+              LaylaBook Admin
+            </p>
+            <h1 className="text-3xl font-semibold tracking-tight text-brand-text">Bookings Dashboard</h1>
+            <p className="mt-2 text-sm text-brand-muted">
+              Review appointments, confirm requests, and keep the day running smoothly.
+            </p>
+          </div>
 
-        <div className="flex gap-2 mb-6">
-          {(['today', 'upcoming', 'all'] as const).map((f) => (
+          <div className="flex flex-wrap gap-2">
             <button
-              key={f}
-              onClick={() => setFilter(f)}
-              className={`px-4 py-2 rounded-xl text-sm capitalize ${
-                filter === f ? 'bg-brand-sage text-white' : 'bg-white text-brand-text'
-              }`}
+              onClick={() => void fetchBookings()}
+              className="rounded-2xl border border-brand-border bg-white px-4 py-2.5 text-sm font-medium text-brand-text shadow-sm transition hover:border-brand-sage"
             >
-              {f}
+              Refresh
             </button>
-          ))}
+            <button
+              onClick={() => setAuthenticated(false)}
+              className="rounded-2xl bg-brand-text px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-black"
+            >
+              Sign out
+            </button>
+          </div>
         </div>
+      </header>
 
-        {loading ? (
-          <p className="text-brand-muted">Loading...</p>
-        ) : bookings.length === 0 ? (
-          <p className="text-brand-muted">No bookings found.</p>
-        ) : (
-          <div className="space-y-3">
-            {bookings.map((b) => (
-              <div key={b.id} className="bg-white rounded-2xl p-5 shadow-sm">
-                <div className="flex justify-between items-start mb-2">
-                  <div>
-                    <p className="font-medium text-brand-text">{b.client_name}</p>
-                    <p className="text-sm text-brand-muted">{b.client_phone}</p>
-                  </div>
-                  <span
-                    className={`px-3 py-1 rounded-full text-xs font-medium ${
-                      b.status === 'confirmed'
-                        ? 'bg-green-100 text-green-700'
-                        : b.status === 'pending'
-                          ? 'bg-yellow-100 text-yellow-700'
-                          : 'bg-gray-100 text-gray-600'
-                    }`}
-                  >
-                    {b.status}
-                  </span>
-                </div>
-                <p className="text-sm text-brand-text mb-1">
-                  {format(parseISO(b.start_time), 'EEEE, d MMMM · HH:mm')}
-                </p>
-                <div className="text-xs text-brand-muted mb-3">
-                  {b.booking_services
-                    ?.filter((s) => s.is_primary)
-                    .map((s) => s.name_at_booking)
-                    .join(', ')}
-                  {b.booking_services && b.booking_services.filter((s) => !s.is_primary).length > 0 && (
-                    <span>
-                      {' '}
-                      +{' '}
-                      {b.booking_services
-                        .filter((s) => !s.is_primary)
-                        .map((s) => s.name_at_booking)
-                        .join(', ')}
-                    </span>
-                  )}
-                </div>
-                <p className="text-sm text-brand-sage font-medium mb-3">€{b.total_price}</p>
-
-                <div className="flex gap-2">
-                  {b.status === 'pending' && (
-                    <button
-                      onClick={() => updateStatus(b.id, 'confirmed')}
-                      className="px-3 py-1.5 rounded-xl text-xs bg-brand-sage text-white"
-                    >
-                      Confirm
-                    </button>
-                  )}
-                  {(b.status === 'pending' || b.status === 'confirmed') && (
-                    <button
-                      onClick={() => updateStatus(b.id, 'cancelled')}
-                      className="px-3 py-1.5 rounded-xl text-xs bg-red-100 text-red-600"
-                    >
-                      Cancel
-                    </button>
-                  )}
-                </div>
-              </div>
-            ))}
+      <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+        {errorMessage && (
+          <div className="mb-5 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+            {errorMessage}
           </div>
         )}
-      </div>
+
+        <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <StatCard label="Bookings" value={stats.total} detail={`${visibleBookings.length} showing`} />
+          <StatCard label="Pending" value={stats.pending} detail="Awaiting confirmation" />
+          <StatCard label="Confirmed" value={stats.confirmed} detail="Ready to go" />
+          <StatCard label="Active value" value={moneyFormatter.format(stats.revenue)} detail="Pending and confirmed" />
+        </section>
+
+        <section className="mt-6 rounded-3xl border border-white bg-white p-4 shadow-[0_18px_50px_rgba(44,44,44,0.06)]">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex rounded-2xl bg-brand-bg p-1">
+              {dateFilters.map((item) => (
+                <button
+                  key={item.value}
+                  onClick={() => {
+                    setFilter(item.value)
+                    void fetchBookings(item.value)
+                  }}
+                  className={`rounded-xl px-4 py-2 text-sm font-medium transition ${
+                    filter === item.value
+                      ? 'bg-white text-brand-text shadow-sm'
+                      : 'text-brand-muted hover:text-brand-text'
+                  }`}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_12rem] lg:min-w-[34rem]">
+              <input
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Search by name, phone, or service"
+                className="w-full rounded-2xl border border-brand-border bg-brand-bg px-4 py-2.5 text-sm outline-none transition focus:border-brand-sage focus:ring-4 focus:ring-brand-sage-light"
+              />
+              <select
+                value={statusFilter}
+                onChange={(event) => setStatusFilter(event.target.value as StatusFilter)}
+                className="w-full rounded-2xl border border-brand-border bg-brand-bg px-4 py-2.5 text-sm outline-none transition focus:border-brand-sage focus:ring-4 focus:ring-brand-sage-light"
+              >
+                {statusFilters.map((item) => (
+                  <option key={item.value} value={item.value}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        </section>
+
+        <section className="mt-5">
+          {loading ? (
+            <div className="grid gap-3">
+              {[1, 2, 3].map((item) => (
+                <div
+                  key={item}
+                  className="h-36 animate-pulse rounded-3xl border border-white bg-white shadow-[0_12px_40px_rgba(44,44,44,0.05)]"
+                />
+              ))}
+            </div>
+          ) : visibleBookings.length === 0 ? (
+            <div className="rounded-3xl border border-dashed border-brand-border bg-white px-6 py-14 text-center">
+              <h2 className="text-xl font-semibold text-brand-text">No bookings found</h2>
+              <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-brand-muted">
+                Try a different date range, status, or search term.
+              </p>
+            </div>
+          ) : (
+            <div className="grid gap-3">
+              {visibleBookings.map((booking) => (
+                <BookingCard
+                  key={booking.id}
+                  booking={booking}
+                  updating={updatingId === booking.id}
+                  onUpdateStatus={updateStatus}
+                />
+              ))}
+            </div>
+          )}
+        </section>
+      </main>
     </div>
+  )
+}
+
+function StatCard({ label, value, detail }: { label: string; value: string | number; detail: string }) {
+  return (
+    <div className="rounded-3xl border border-white bg-white p-5 shadow-[0_14px_40px_rgba(44,44,44,0.06)]">
+      <p className="text-sm font-medium text-brand-muted">{label}</p>
+      <p className="mt-3 text-3xl font-semibold tracking-tight text-brand-text">{value}</p>
+      <p className="mt-2 text-xs font-medium uppercase tracking-[0.16em] text-brand-sage">{detail}</p>
+    </div>
+  )
+}
+
+function BookingCard({
+  booking,
+  updating,
+  onUpdateStatus,
+}: {
+  booking: Booking
+  updating: boolean
+  onUpdateStatus: (id: string, status: Booking['status']) => void
+}) {
+  const addons = getAddons(booking)
+  const start = parseISO(booking.start_time)
+  const end = parseISO(booking.end_time)
+
+  return (
+    <article className="rounded-3xl border border-white bg-white p-5 shadow-[0_12px_40px_rgba(44,44,44,0.05)] transition hover:-translate-y-0.5 hover:shadow-[0_20px_60px_rgba(44,44,44,0.08)]">
+      <div className="grid gap-5 lg:grid-cols-[1.1fr_1fr_auto] lg:items-center">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-3">
+            <h2 className="truncate text-lg font-semibold text-brand-text">{booking.client_name}</h2>
+            <span className={`rounded-full px-3 py-1 text-xs font-semibold ring-1 ${statusStyles[booking.status]}`}>
+              {statusLabels[booking.status]}
+            </span>
+          </div>
+          <a className="mt-1 block text-sm text-brand-muted hover:text-brand-text" href={`tel:${booking.client_phone}`}>
+            {booking.client_phone}
+          </a>
+          {booking.notes && <p className="mt-3 text-sm leading-6 text-brand-muted">{booking.notes}</p>}
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
+          <Detail label="Date" value={format(start, 'EEE, d MMM')} />
+          <Detail label="Time" value={`${format(start, 'HH:mm')} - ${format(end, 'HH:mm')}`} />
+          <Detail label="Total" value={moneyFormatter.format(Number(booking.total_price || 0))} />
+        </div>
+
+        <div className="lg:min-w-72">
+          <div className="rounded-2xl bg-brand-bg p-4">
+            <p className="text-sm font-semibold text-brand-text">{getPrimaryService(booking)}</p>
+            {addons.length > 0 ? (
+              <p className="mt-1 text-xs leading-5 text-brand-muted">Add-ons: {addons.join(', ')}</p>
+            ) : (
+              <p className="mt-1 text-xs text-brand-muted">No add-ons selected</p>
+            )}
+          </div>
+
+          <div className="mt-3 flex flex-wrap justify-end gap-2">
+            {booking.status === 'pending' && (
+              <ActionButton disabled={updating} onClick={() => onUpdateStatus(booking.id, 'confirmed')}>
+                Confirm
+              </ActionButton>
+            )}
+            {booking.status === 'confirmed' && (
+              <ActionButton disabled={updating} onClick={() => onUpdateStatus(booking.id, 'completed')}>
+                Complete
+              </ActionButton>
+            )}
+            {booking.status === 'confirmed' && (
+              <ActionButton
+                disabled={updating}
+                variant="neutral"
+                onClick={() => onUpdateStatus(booking.id, 'no_show')}
+              >
+                No-show
+              </ActionButton>
+            )}
+            {isActiveBooking(booking) && (
+              <ActionButton disabled={updating} variant="danger" onClick={() => onUpdateStatus(booking.id, 'cancelled')}>
+                Cancel
+              </ActionButton>
+            )}
+          </div>
+        </div>
+      </div>
+    </article>
+  )
+}
+
+function Detail({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-brand-muted">{label}</p>
+      <p className="mt-1 text-sm font-semibold text-brand-text">{value}</p>
+    </div>
+  )
+}
+
+function ActionButton({
+  children,
+  disabled,
+  onClick,
+  variant = 'primary',
+}: {
+  children: string
+  disabled: boolean
+  onClick: () => void
+  variant?: 'primary' | 'neutral' | 'danger'
+}) {
+  const styles = {
+    primary: 'bg-brand-text text-white hover:bg-black',
+    neutral: 'bg-stone-100 text-stone-700 hover:bg-stone-200',
+    danger: 'bg-rose-100 text-rose-700 hover:bg-rose-200',
+  }
+
+  return (
+    <button
+      disabled={disabled}
+      onClick={onClick}
+      className={`rounded-xl px-3 py-2 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${styles[variant]}`}
+    >
+      {disabled ? 'Updating...' : children}
+    </button>
   )
 }

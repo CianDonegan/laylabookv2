@@ -9,6 +9,24 @@ interface UseBookingReturn {
   bookingId: string | null
 }
 
+function getBookingErrorMessage(err: unknown) {
+  const fallback = 'Booking failed'
+  const message = err instanceof Error ? err.message : fallback
+  const normalized = message.toLowerCase()
+
+  if (
+    normalized.includes('available') ||
+    normalized.includes('unavailable') ||
+    normalized.includes('overlap') ||
+    normalized.includes('conflict') ||
+    normalized.includes('already booked')
+  ) {
+    return 'That appointment time is no longer available. Please choose another time.'
+  }
+
+  return message
+}
+
 export function useBooking(): UseBookingReturn {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -34,9 +52,9 @@ export function useBooking(): UseBookingReturn {
       setBookingId(data)
       return data
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Booking failed'
+      const msg = getBookingErrorMessage(err)
       setError(msg)
-      throw new Error(msg)
+      throw new Error(msg, { cause: err })
     } finally {
       setLoading(false)
     }

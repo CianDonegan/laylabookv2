@@ -11,12 +11,12 @@ export function useAvailability(date: string, durationMinutes: number): UseAvail
   const [slots, setSlots] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const hasRequiredInput = Boolean(date && durationMinutes)
 
   useEffect(() => {
-    if (!date || !durationMinutes) {
-      setSlots([])
-      return
-    }
+    if (!hasRequiredInput) return
+
+    let cancelled = false
 
     async function fetch() {
       setLoading(true)
@@ -27,16 +27,24 @@ export function useAvailability(date: string, durationMinutes: number): UseAvail
           p_duration_minutes: durationMinutes,
         })
         if (error) throw error
+        if (cancelled) return
         setSlots((data || []).map((row: { slot_time: string }) => row.slot_time.slice(0, 5)))
       } catch (err) {
+        if (cancelled) return
         setError(err instanceof Error ? err.message : 'Failed to load slots')
       } finally {
-        setLoading(false)
+        if (!cancelled) {
+          setLoading(false)
+        }
       }
     }
 
     fetch()
-  }, [date, durationMinutes])
 
-  return { slots, loading, error }
+    return () => {
+      cancelled = true
+    }
+  }, [date, durationMinutes, hasRequiredInput])
+
+  return { slots: hasRequiredInput ? slots : [], loading: hasRequiredInput ? loading : false, error }
 }

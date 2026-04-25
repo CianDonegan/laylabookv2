@@ -18,7 +18,11 @@ interface ClientFormProps {
 
 export default function ClientForm({ form, onChange, onSubmit, loading, error, summary }: ClientFormProps) {
   const cleanPhone = form.phone.replace(/\s/g, '')
-  const isValid = form.name.trim().length >= 2 && /^(\+353|0)\d{8,9}$/.test(cleanPhone)
+  const nameStarted = form.name.length > 0
+  const phoneStarted = form.phone.length > 0
+  const nameValid = form.name.trim().length >= 2
+  const phoneValid = /^(\+353|0)\d{8,9}$/.test(cleanPhone)
+  const isValid = nameValid && phoneValid
 
   return (
     <div className="bg-white rounded-3xl shadow-sm overflow-hidden mb-4">
@@ -32,49 +36,75 @@ export default function ClientForm({ form, onChange, onSubmit, loading, error, s
       </div>
 
       <div className="p-6">
-        <div className="grid gap-3 mb-5">
-          <input
-            placeholder="Your name"
-            value={form.name}
-            onChange={(e) => onChange({ ...form, name: e.target.value })}
-            className="w-full rounded-2xl px-4 py-3 text-sm focus:outline-none border border-brand-border bg-brand-bg text-brand-text"
-          />
-          <input
-            placeholder="Phone number"
-            value={form.phone}
-            onChange={(e) => onChange({ ...form, phone: e.target.value })}
-            className="w-full rounded-2xl px-4 py-3 text-sm focus:outline-none border border-brand-border bg-brand-bg text-brand-text"
-          />
+        <div className="grid gap-4 mb-5">
+          <div>
+            <label htmlFor="client-name" className="mb-1.5 block text-xs font-medium text-brand-text">
+              Name
+            </label>
+            <input
+              id="client-name"
+              name="name"
+              type="text"
+              autoComplete="name"
+              placeholder="Your name"
+              value={form.name}
+              onChange={(e) => onChange({ ...form, name: e.target.value })}
+              className="w-full rounded-2xl px-4 py-3 text-sm focus:outline-none border border-brand-border bg-brand-bg text-brand-text"
+            />
+            {nameStarted && !nameValid && (
+              <p className="mt-1.5 text-xs text-red-500">Please enter at least 2 characters.</p>
+            )}
+          </div>
+
+          <div>
+            <label htmlFor="client-phone" className="mb-1.5 block text-xs font-medium text-brand-text">
+              Phone number
+            </label>
+            <input
+              id="client-phone"
+              name="tel"
+              type="tel"
+              inputMode="tel"
+              autoComplete="tel"
+              placeholder="08xxxxxxxx or +353xxxxxxxxx"
+              value={form.phone}
+              onChange={(e) => onChange({ ...form, phone: e.target.value })}
+              className="w-full rounded-2xl px-4 py-3 text-sm focus:outline-none border border-brand-border bg-brand-bg text-brand-text"
+            />
+            <p className={`mt-1.5 text-xs ${phoneStarted && !phoneValid ? 'text-red-500' : 'text-brand-muted'}`}>
+              Use an Irish mobile number, starting with 08 or +353.
+            </p>
+          </div>
         </div>
 
         <div className="rounded-2xl p-4 mb-5 bg-brand-sage-light">
           <p className="text-xs uppercase tracking-widest mb-3 text-brand-sage">Summary</p>
           <div className="grid gap-2 text-sm">
-            <div className="flex justify-between">
+            <div className="flex justify-between gap-4">
               <span className="text-brand-muted">Service</span>
-              <span className="text-brand-text">{summary.primaryService.name}</span>
+              <span className="text-right text-brand-text">{summary.primaryService.name}</span>
             </div>
             {summary.addons.map((a) => (
-              <div key={a.id} className="flex justify-between">
+              <div key={a.id} className="flex justify-between gap-4">
                 <span className="text-brand-muted">Add-on</span>
-                <span className="text-brand-text">{a.name}</span>
+                <span className="text-right text-brand-text">{a.name}</span>
               </div>
             ))}
-            <div className="flex justify-between">
+            <div className="flex justify-between gap-4">
               <span className="text-brand-muted">Date</span>
               <span className="text-brand-text">{summary.dateLabel}</span>
             </div>
-            <div className="flex justify-between">
+            <div className="flex justify-between gap-4">
               <span className="text-brand-muted">Time</span>
               <span className="text-brand-text">{summary.time}</span>
             </div>
-            <div className="flex justify-between">
+            <div className="flex justify-between gap-4">
               <span className="text-brand-muted">Duration</span>
               <span className="text-brand-text">{summary.duration}min</span>
             </div>
-            <div className="flex justify-between pt-2 border-t border-brand-border">
+            <div className="flex justify-between gap-4 pt-2 border-t border-brand-border">
               <span className="text-brand-muted">Total</span>
-              <span className="font-semibold text-brand-sage">€{summary.totalPrice}</span>
+              <span className="font-semibold text-brand-sage">EUR {summary.totalPrice}</span>
             </div>
           </div>
         </div>

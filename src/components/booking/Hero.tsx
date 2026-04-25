@@ -21,18 +21,18 @@ export default function Hero() {
             Layla Donegan
           </h1>
           <p className="text-xs font-medium uppercase tracking-widest text-brand-sage">
-            Beauty by Layla · Dublin · Est. 2022
+            Beauty by Layla - Dublin - Est. 2022
           </p>
         </div>
         <p className="text-sm leading-relaxed mb-5 text-brand-muted">
           Welcome to Beauty by Layla. I'm a Dublin-based beauty professional specialising in
           nails, waxing, lashes, brows, makeup, and spray tans. Book your appointment below.
         </p>
-        <div className="flex gap-4 text-xs font-medium text-brand-sage">
-          <span>💅 Nails</span>
-          <span>✨ Lashes & Brows</span>
-          <span>🌿 Waxing</span>
-          <span>💄 Makeup</span>
+        <div className="flex flex-wrap gap-4 text-xs font-medium text-brand-sage">
+          <span>Nails</span>
+          <span>Lashes & Brows</span>
+          <span>Waxing</span>
+          <span>Makeup</span>
         </div>
       </div>
     </div>
