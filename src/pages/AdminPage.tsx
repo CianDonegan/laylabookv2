@@ -1,17 +1,18 @@
 import { useState, useMemo } from 'react'
 import { supabase } from '../lib/supabase'
-import { differenceInMinutes, format, parseISO } from 'date-fns'
+import { addDays, differenceInMinutes, format, parseISO } from 'date-fns'
 import type { Booking } from '../types'
 
 const ADMIN_PASSWORD = 'layla2026'
 
-type DateFilter = 'today' | 'upcoming' | 'all'
+type AdminView = 'today' | 'week' | 'month' | 'list'
 type StatusFilter = 'all' | Booking['status']
 
-const dateFilters: { value: DateFilter; label: string }[] = [
+const viewTabs: { value: AdminView; label: string }[] = [
   { value: 'today', label: 'Today' },
-  { value: 'upcoming', label: 'Upcoming' },
-  { value: 'all', label: 'All' },
+  { value: 'week', label: 'Week' },
+  { value: 'month', label: 'Month' },
+  { value: 'list', label: 'List' },
 ]
 
 const statusFilters: { value: StatusFilter; label: string }[] = [
@@ -80,18 +81,28 @@ function getScheduleBlockHeight(booking: Booking) {
   return Math.min(260, Math.max(150, duration * 1.8))
 }
 
+function getLocalDateKey(date: Date) {
+  return format(date, 'yyyy-MM-dd')
+}
+
+function getLocalDayStart(date = new Date()) {
+  const start = new Date(date)
+  start.setHours(0, 0, 0, 0)
+  return start
+}
+
 export default function AdminPage() {
   const [password, setPassword] = useState('')
   const [authenticated, setAuthenticated] = useState(false)
   const [bookings, setBookings] = useState<Booking[]>([])
   const [loading, setLoading] = useState(true)
-  const [filter, setFilter] = useState<DateFilter>('today')
+  const [view, setView] = useState<AdminView>('today')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
   const [search, setSearch] = useState('')
   const [errorMessage, setErrorMessage] = useState('')
   const [updatingId, setUpdatingId] = useState<string | null>(null)
 
-  async function fetchBookings(nextFilter = filter) {
+  async function fetchBookings(nextView = view) {
     setLoading(true)
     setErrorMessage('')
 
@@ -100,11 +111,13 @@ export default function AdminPage() {
       .select('*, booking_services(name_at_booking, is_primary, price_at_booking)')
       .order('start_time', { ascending: true })
 
-    if (nextFilter === 'today') {
+    if (nextView === 'today') {
       const today = new Date().toISOString().split('T')[0]
       query = query.gte('start_time', `${today}T00:00:00`).lt('start_time', `${today}T23:59:59`)
-    } else if (nextFilter === 'upcoming') {
-      query = query.gte('start_time', new Date().toISOString())
+    } else if (nextView === 'week') {
+      const start = getLocalDayStart()
+      const end = addDays(start, 7)
+      query = query.gte('start_time', start.toISOString()).lt('start_time', end.toISOString())
     }
 
     const { data, error } = await query
@@ -134,10 +147,20 @@ export default function AdminPage() {
     setUpdatingId(id)
     setErrorMessage('')
 
-    const { error } = await supabase.from('bookings').update({ status }).eq('id', id)
+    const { data, error } = await supabase
+      .from('bookings')
+      .update({ status })
+      .eq('id', id)
+      .select('id,status')
 
     if (error) {
       setErrorMessage('Could not update this booking. Please try again.')
+      setUpdatingId(null)
+      return
+    }
+
+    if (!data || data.length === 0) {
+      setErrorMessage('Booking was not updated. Check admin update permissions.')
       setUpdatingId(null)
       return
     }
@@ -280,15 +303,15 @@ export default function AdminPage() {
         <section className="mt-6 rounded-3xl border border-white bg-white p-4 shadow-[0_18px_50px_rgba(44,44,44,0.06)]">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex rounded-2xl bg-brand-bg p-1">
-              {dateFilters.map((item) => (
+              {viewTabs.map((item) => (
                 <button
                   key={item.value}
                   onClick={() => {
-                    setFilter(item.value)
+                    setView(item.value)
                     void fetchBookings(item.value)
                   }}
                   className={`rounded-xl px-4 py-2 text-sm font-medium transition ${
-                    filter === item.value
+                    view === item.value
                       ? 'bg-white text-brand-text shadow-sm'
                       : 'text-brand-muted hover:text-brand-text'
                   }`}
@@ -330,6 +353,13 @@ export default function AdminPage() {
                 />
               ))}
             </div>
+          ) : view === 'week' ? (
+            <WeekView bookings={visibleBookings} />
+          ) : view === 'month' ? (
+            <ViewPlaceholder
+              title="Month view"
+              message="The next phase will turn this into a monthly booking and revenue overview."
+            />
           ) : visibleBookings.length === 0 ? (
             <div className="rounded-3xl border border-dashed border-brand-border bg-white px-6 py-14 text-center">
               <h2 className="text-xl font-semibold text-brand-text">No bookings found</h2>
@@ -339,8 +369,8 @@ export default function AdminPage() {
             </div>
           ) : (
             <>
-              {filter === 'today' && <TodaySummary summary={todaySummary} />}
-              {filter === 'today' ? (
+              {view === 'today' && <TodaySummary summary={todaySummary} />}
+              {view === 'today' ? (
                 <TodaySchedule
                   bookings={visibleBookings}
                   updatingId={updatingId}
@@ -382,6 +412,84 @@ function TodaySummary({
       <ScheduleStat label="Last appointment" value={summary.lastAppointment} />
       <ScheduleStat label="Booked time" value={summary.totalBookedTime} />
       <ScheduleStat label="Pending/confirmed" value={summary.activeCount} />
+    </div>
+  )
+}
+
+function ViewPlaceholder({ title, message }: { title: string; message: string }) {
+  return (
+    <div className="rounded-3xl border border-dashed border-brand-border bg-white px-6 py-14 text-center">
+      <h2 className="text-xl font-semibold text-brand-text">{title}</h2>
+      <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-brand-muted">{message}</p>
+    </div>
+  )
+}
+
+function WeekView({ bookings }: { bookings: Booking[] }) {
+  const days = useMemo(() => {
+    const start = getLocalDayStart()
+    return Array.from({ length: 7 }, (_, index) => {
+      const date = addDays(start, index)
+      const key = getLocalDateKey(date)
+      const dayBookings = bookings.filter((booking) => getLocalDateKey(parseISO(booking.start_time)) === key)
+      const revenue = dayBookings
+        .filter(isActiveBooking)
+        .reduce((sum, booking) => sum + Number(booking.total_price || 0), 0)
+
+      return { date, key, bookings: dayBookings, revenue }
+    })
+  }, [bookings])
+
+  return (
+    <div className="grid gap-3">
+      {days.map((day) => (
+        <section key={day.key} className="rounded-3xl border border-white bg-white p-5 shadow-[0_12px_40px_rgba(44,44,44,0.05)]">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-brand-border pb-3">
+            <div>
+              <h2 className="text-lg font-semibold text-brand-text">{format(day.date, 'EEE d MMM')}</h2>
+              <p className="mt-1 text-xs font-medium uppercase tracking-[0.14em] text-brand-muted">
+                {day.bookings.length} {day.bookings.length === 1 ? 'booking' : 'bookings'}
+              </p>
+            </div>
+            <p className="text-sm font-semibold text-brand-sage">{moneyFormatter.format(day.revenue)}</p>
+          </div>
+
+          {day.bookings.length === 0 ? (
+            <p className="py-3 text-sm text-brand-muted">No bookings scheduled.</p>
+          ) : (
+            <div className="grid gap-2">
+              {day.bookings.map((booking) => (
+                <WeekBookingRow key={booking.id} booking={booking} />
+              ))}
+            </div>
+          )}
+        </section>
+      ))}
+    </div>
+  )
+}
+
+function WeekBookingRow({ booking }: { booking: Booking }) {
+  const start = parseISO(booking.start_time)
+  const end = parseISO(booking.end_time)
+
+  return (
+    <div className="grid gap-3 rounded-2xl bg-brand-bg px-4 py-3 sm:grid-cols-[9rem_minmax(0,1fr)_auto] sm:items-center">
+      <p className="text-sm font-semibold text-brand-text">
+        {format(start, 'HH:mm')} - {format(end, 'HH:mm')}
+      </p>
+      <div className="min-w-0">
+        <p className="truncate text-sm font-semibold text-brand-text">{getPrimaryService(booking)}</p>
+        <p className="mt-1 truncate text-xs text-brand-muted">{booking.client_name}</p>
+      </div>
+      <div className="flex items-center gap-2 sm:justify-end">
+        <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ${statusStyles[booking.status]}`}>
+          {statusLabels[booking.status]}
+        </span>
+        <span className="text-sm font-semibold text-brand-sage">
+          {moneyFormatter.format(Number(booking.total_price || 0))}
+        </span>
+      </div>
     </div>
   )
 }
