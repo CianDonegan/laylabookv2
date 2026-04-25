@@ -424,6 +424,7 @@ function TodaySchedule({
                 updating={updatingId === booking.id}
                 onUpdateStatus={onUpdateStatus}
                 minHeight={getScheduleBlockHeight(booking)}
+                scheduleMode
               />
             </div>
           </div>
@@ -442,7 +443,7 @@ function GapIndicator({ minutes, overlap = false }: { minutes: number; overlap?:
           overlap ? 'bg-rose-50 text-rose-700' : 'bg-brand-sage-light text-brand-sage'
         }`}
       >
-        {formatDuration(minutes)} {overlap ? 'overlap' : 'gap'}
+        {formatDuration(minutes)} {overlap ? 'overlap' : 'free'}
       </span>
       <div className="h-px flex-1 bg-brand-border" />
     </div>
@@ -464,11 +465,13 @@ function BookingCard({
   updating,
   onUpdateStatus,
   minHeight,
+  scheduleMode = false,
 }: {
   booking: Booking
   updating: boolean
   onUpdateStatus: (id: string, status: Booking['status']) => void
   minHeight?: number
+  scheduleMode?: boolean
 }) {
   const addons = getAddons(booking)
   const start = parseISO(booking.start_time)
@@ -482,18 +485,48 @@ function BookingCard({
       style={minHeight ? { minHeight } : undefined}
     >
       <div className="grid h-full gap-5 lg:grid-cols-[1.1fr_1fr_auto] lg:items-center">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-3">
-            <h2 className="truncate text-lg font-semibold text-brand-text">{booking.client_name}</h2>
-            <span className={`rounded-full px-3 py-1 text-xs font-semibold ring-1 ${statusStyles[booking.status]}`}>
-              {statusLabels[booking.status]}
-            </span>
+        {scheduleMode ? (
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-3">
+              <h2 className="text-2xl font-semibold tracking-tight text-brand-text">
+                {format(start, 'HH:mm')} - {format(end, 'HH:mm')}
+              </h2>
+              <span className={`rounded-full px-3 py-1 text-xs font-semibold ring-1 ${statusStyles[booking.status]}`}>
+                {statusLabels[booking.status]}
+              </span>
+            </div>
+            <p className="mt-3 text-base font-semibold text-brand-text">{getPrimaryService(booking)}</p>
+            {addons.length > 0 && (
+              <div className="mt-1 grid gap-1">
+                {addons.map((addon) => (
+                  <p key={`${booking.id}-${addon.name_at_booking}-summary`} className="text-sm text-brand-muted">
+                    + {addon.name_at_booking}
+                  </p>
+                ))}
+              </div>
+            )}
+            <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1">
+              <p className="text-sm font-medium text-brand-text">{booking.client_name}</p>
+              <a className="text-sm text-brand-muted hover:text-brand-text" href={`tel:${booking.client_phone}`}>
+                {booking.client_phone}
+              </a>
+            </div>
+            {booking.notes && <p className="mt-3 text-sm leading-6 text-brand-muted">{booking.notes}</p>}
           </div>
-          <a className="mt-1 block text-sm text-brand-muted hover:text-brand-text" href={`tel:${booking.client_phone}`}>
-            {booking.client_phone}
-          </a>
-          {booking.notes && <p className="mt-3 text-sm leading-6 text-brand-muted">{booking.notes}</p>}
-        </div>
+        ) : (
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-3">
+              <h2 className="truncate text-lg font-semibold text-brand-text">{booking.client_name}</h2>
+              <span className={`rounded-full px-3 py-1 text-xs font-semibold ring-1 ${statusStyles[booking.status]}`}>
+                {statusLabels[booking.status]}
+              </span>
+            </div>
+            <a className="mt-1 block text-sm text-brand-muted hover:text-brand-text" href={`tel:${booking.client_phone}`}>
+              {booking.client_phone}
+            </a>
+            {booking.notes && <p className="mt-3 text-sm leading-6 text-brand-muted">{booking.notes}</p>}
+          </div>
+        )}
 
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
           <Detail label="Date" value={format(start, 'EEE, d MMM')} />
@@ -507,7 +540,9 @@ function BookingCard({
           <div className="rounded-2xl bg-brand-bg p-4">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-brand-muted">Primary service</p>
+                {!scheduleMode && (
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-brand-muted">Primary service</p>
+                )}
                 <p className="mt-1 text-sm font-semibold text-brand-text">{getPrimaryService(booking)}</p>
               </div>
               {primaryService && formatServicePrice(primaryService.price_at_booking) && (
