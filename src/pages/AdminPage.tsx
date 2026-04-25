@@ -124,8 +124,9 @@ export default function AdminPage() {
       .order('start_time', { ascending: true })
 
     if (nextView === 'today') {
-      const today = new Date().toISOString().split('T')[0]
-      query = query.gte('start_time', `${today}T00:00:00`).lt('start_time', `${today}T23:59:59`)
+      const start = getLocalDayStart()
+      const end = addDays(start, 1)
+      query = query.gte('start_time', start.toISOString()).lt('start_time', end.toISOString())
     } else if (nextView === 'week') {
       const start = getLocalDayStart()
       const end = addDays(start, 7)
@@ -176,7 +177,7 @@ export default function AdminPage() {
     }
 
     if (!data || data.length === 0) {
-      setErrorMessage('Booking was not updated. Check admin update permissions.')
+      setErrorMessage('Could not update booking. Please try again.')
       setUpdatingId(null)
       return
     }
@@ -760,6 +761,12 @@ function BookingCard({
           </div>
 
           <div className="mt-3 flex flex-wrap justify-end gap-2">
+            <a
+              href={`tel:${booking.client_phone}`}
+              className="rounded-xl bg-white px-3 py-2 text-xs font-semibold text-brand-text ring-1 ring-brand-border transition hover:ring-brand-sage"
+            >
+              Call
+            </a>
             {booking.status === 'pending' && (
               <ActionButton disabled={updating} onClick={() => onUpdateStatus(booking.id, 'confirmed')}>
                 Confirm
