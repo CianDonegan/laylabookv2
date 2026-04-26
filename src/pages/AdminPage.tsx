@@ -1811,6 +1811,7 @@ function WeekView({
   onUpdateStatus: (id: string, status: Booking['status']) => void
   onReschedule: (booking: Booking) => void
 }) {
+  const todayKey = getLocalDateKey(new Date())
   const days = useMemo(() => {
     const start = getLocalDayStart()
     return Array.from({ length: 7 }, (_, index) => {
@@ -1827,35 +1828,67 @@ function WeekView({
 
   return (
     <div className="grid gap-3">
-      {days.map((day) => (
-        <section key={day.key} className="rounded-3xl border border-white bg-white p-5 shadow-[0_12px_40px_rgba(44,44,44,0.05)]">
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-brand-border pb-3">
-            <div>
-              <h2 className="text-lg font-semibold text-brand-text">{format(day.date, 'EEE d MMM')}</h2>
-              <p className="mt-1 text-xs font-medium uppercase tracking-[0.14em] text-brand-muted">
-                {day.bookings.length} {day.bookings.length === 1 ? 'booking' : 'bookings'}
-              </p>
-            </div>
-            <p className="text-sm font-semibold text-brand-sage">{moneyFormatter.format(day.revenue)}</p>
-          </div>
+      {days.map((day) => {
+        const hasBookings = day.bookings.length > 0
+        const hasRevenue = day.revenue > 0
+        const isToday = day.key === todayKey
 
-          {day.bookings.length === 0 ? (
-            <p className="py-3 text-sm text-brand-muted">No bookings scheduled.</p>
-          ) : (
-            <div className="grid gap-2">
-              {day.bookings.map((booking) => (
-                <WeekBookingRow
-                  key={booking.id}
-                  booking={booking}
-                  updating={updatingId === booking.id}
-                  onUpdateStatus={onUpdateStatus}
-                  onReschedule={onReschedule}
-                />
-              ))}
+        return (
+          <section
+            key={day.key}
+            className={`rounded-3xl border p-4 shadow-[0_12px_40px_rgba(44,44,44,0.05)] transition ${
+              hasBookings
+                ? 'border-[#dfe6da] border-l-4 border-l-brand-sage bg-[#fbfcfa]'
+                : 'border-white bg-white/80'
+            } ${isToday ? 'ring-2 ring-brand-sage ring-offset-2 ring-offset-[#f7f8f4]' : ''}`}
+          >
+            <div
+              className={`flex flex-wrap items-center justify-between gap-3 ${
+                hasBookings ? 'mb-4 border-b border-brand-border pb-3' : ''
+              }`}
+            >
+              <div className="flex flex-wrap items-center gap-2">
+                <h2
+                  className={`rounded-full px-3 py-1.5 text-sm font-semibold ${
+                    isToday ? 'bg-brand-sage text-white' : 'bg-brand-bg text-brand-text'
+                  }`}
+                >
+                  {format(day.date, 'EEE d MMM')}
+                </h2>
+                {isToday && (
+                  <span className="rounded-full bg-brand-sage-light px-2.5 py-1 text-xs font-semibold text-brand-sage">
+                    Today
+                  </span>
+                )}
+                {hasBookings && (
+                  <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-brand-muted ring-1 ring-brand-border">
+                    {day.bookings.length} {day.bookings.length === 1 ? 'booking' : 'bookings'}
+                  </span>
+                )}
+              </div>
+              {hasRevenue && (
+                <span className="rounded-full bg-brand-text px-3 py-1.5 text-xs font-semibold text-white shadow-sm">
+                  {moneyFormatter.format(day.revenue)}
+                </span>
+              )}
             </div>
-          )}
-        </section>
-      ))}
+
+            {hasBookings && (
+              <div className="grid gap-2">
+                {day.bookings.map((booking) => (
+                  <WeekBookingRow
+                    key={booking.id}
+                    booking={booking}
+                    updating={updatingId === booking.id}
+                    onUpdateStatus={onUpdateStatus}
+                    onReschedule={onReschedule}
+                  />
+                ))}
+              </div>
+            )}
+          </section>
+        )
+      })}
     </div>
   )
 }
@@ -1878,13 +1911,16 @@ function WeekBookingRow({
 
   return (
     <div
-      className={`grid gap-3 rounded-2xl px-4 py-3 sm:grid-cols-[9rem_minmax(0,1fr)_auto] sm:items-center ${
-        needsAction ? 'bg-amber-50/70 ring-1 ring-amber-100' : 'bg-brand-bg'
+      className={`grid gap-3 rounded-2xl border px-4 py-3 sm:grid-cols-[9rem_minmax(0,1fr)_auto] sm:items-center ${
+        needsAction ? 'border-l-4 border-amber-300 bg-amber-50/70' : 'border-transparent bg-brand-bg'
       }`}
     >
-      <p className="text-sm font-semibold text-brand-text">
-        {format(start, 'HH:mm')} - {format(end, 'HH:mm')}
-      </p>
+      <div className="flex items-center gap-2">
+        {needsAction && <span className="h-2.5 w-2.5 rounded-full bg-amber-400" />}
+        <p className="text-sm font-semibold text-brand-text">
+          {format(start, 'HH:mm')} - {format(end, 'HH:mm')}
+        </p>
+      </div>
       <div className="min-w-0">
         <p className="truncate text-sm font-semibold text-brand-text">{getPrimaryService(booking)}</p>
         <p className="mt-1 truncate text-xs text-brand-muted">{booking.client_name}</p>
