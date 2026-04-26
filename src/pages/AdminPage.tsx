@@ -706,7 +706,17 @@ function ClientsView({ onSaved }: { onSaved: (message: string) => void }) {
   const [expandedClientId, setExpandedClientId] = useState<string | null>(null)
   const [notesDrafts, setNotesDrafts] = useState<Record<string, string>>({})
   const [savingClientId, setSavingClientId] = useState<string | null>(null)
+  const [savedClientId, setSavedClientId] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState('')
+  const savedTimeoutRef = useRef<number | null>(null)
+
+  useEffect(() => {
+    return () => {
+      if (savedTimeoutRef.current) {
+        window.clearTimeout(savedTimeoutRef.current)
+      }
+    }
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -766,8 +776,21 @@ function ClientsView({ onSaved }: { onSaved: (message: string) => void }) {
     )
   }, [clients, search])
 
+  const markClientSaved = (clientId: string) => {
+    if (savedTimeoutRef.current) {
+      window.clearTimeout(savedTimeoutRef.current)
+    }
+
+    setSavedClientId(clientId)
+    savedTimeoutRef.current = window.setTimeout(() => {
+      setSavedClientId((current) => (current === clientId ? null : current))
+      savedTimeoutRef.current = null
+    }, 2000)
+  }
+
   const saveNotes = async (client: ClientProfile) => {
     setSavingClientId(client.id)
+    setSavedClientId(null)
     setErrorMessage('')
 
     const nextNotes = notesDrafts[client.id]?.trim() || null
@@ -789,6 +812,7 @@ function ClientsView({ onSaved }: { onSaved: (message: string) => void }) {
     )
     setNotesDrafts((current) => ({ ...current, [client.id]: data.notes || '' }))
     onSaved('Client notes saved.')
+    markClientSaved(client.id)
     setSavingClientId(null)
   }
 
@@ -887,9 +911,12 @@ function ClientsView({ onSaved }: { onSaved: (message: string) => void }) {
                     </span>
                     <textarea
                       value={notesDrafts[client.id] || ''}
-                      onChange={(event) =>
+                      onChange={(event) => {
+                        if (savedClientId === client.id) {
+                          setSavedClientId(null)
+                        }
                         setNotesDrafts((current) => ({ ...current, [client.id]: event.target.value }))
-                      }
+                      }}
                       rows={3}
                       placeholder="Add private client notes"
                       className="w-full resize-none rounded-2xl border border-brand-border bg-white px-4 py-3 text-sm text-brand-text outline-none transition focus:border-brand-sage focus:ring-4 focus:ring-brand-sage-light"
@@ -898,9 +925,10 @@ function ClientsView({ onSaved }: { onSaved: (message: string) => void }) {
                   <div className="mt-3 flex justify-end">
                     <ActionButton
                       disabled={savingClientId === client.id}
+                      variant={savedClientId === client.id ? 'success' : 'primary'}
                       onClick={() => void saveNotes(client)}
                     >
-                      Save Notes
+                      {savedClientId === client.id ? 'Saved' : 'Save Notes'}
                     </ActionButton>
                   </div>
                 </div>
@@ -2266,12 +2294,13 @@ function ActionButton({
   children: string
   disabled: boolean
   onClick: () => void
-  variant?: 'primary' | 'neutral' | 'danger'
+  variant?: 'primary' | 'neutral' | 'danger' | 'success'
 }) {
   const styles = {
     primary: 'bg-brand-text text-white hover:bg-black',
     neutral: 'bg-stone-100 text-stone-700 hover:bg-stone-200',
     danger: 'bg-rose-100 text-rose-700 hover:bg-rose-200',
+    success: 'bg-emerald-100 text-emerald-700 ring-1 ring-emerald-200 hover:bg-emerald-100',
   }
 
   return (
