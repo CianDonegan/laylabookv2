@@ -1937,12 +1937,16 @@ function WeekBookingRow({
 const monthWeekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
 function MonthView({ bookings }: { bookings: Booking[] }) {
+  const { hours: monthlyWorkingHours, loading: workingHoursLoading } = useWorkingHours()
   const todayKey = getLocalDateKey(new Date())
   const monthStart = startOfMonth(getLocalDayStart())
   const monthEnd = endOfMonth(monthStart)
   const gridStart = startOfWeek(monthStart, { weekStartsOn: 1 })
   const gridEnd = endOfWeek(monthEnd, { weekStartsOn: 1 })
   const days = eachDayOfInterval({ start: gridStart, end: gridEnd })
+  const monthlyActiveBookings = bookings.filter(isValueActiveBooking)
+  const monthlyRevenue = monthlyActiveBookings.reduce((sum, booking) => sum + Number(booking.total_price || 0), 0)
+  const activeDayCount = new Set(monthlyActiveBookings.map((booking) => getLocalDateKey(parseISO(booking.start_time)))).size
 
   const bookingsByDay = bookings.reduce<Record<string, Booking[]>>((groups, booking) => {
     const key = getLocalDateKey(parseISO(booking.start_time))
@@ -1952,22 +1956,39 @@ function MonthView({ bookings }: { bookings: Booking[] }) {
 
   return (
     <section className="rounded-3xl border border-white bg-white p-5 shadow-[0_12px_40px_rgba(44,44,44,0.05)]">
-      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+      <div className="mb-5 flex flex-col gap-4 border-b border-brand-border pb-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
+          <p className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-brand-sage">
+            Calendar
+          </p>
           <h2 className="text-xl font-semibold text-brand-text">{format(monthStart, 'MMMM yyyy')}</h2>
           <p className="mt-1 text-sm text-brand-muted">Monthly booking count and active revenue.</p>
         </div>
+        <div className="flex flex-wrap gap-2">
+          <span className="rounded-full bg-brand-bg px-3 py-1.5 text-xs font-semibold text-brand-text">
+            {monthlyActiveBookings.length} active
+          </span>
+          <span className="rounded-full bg-brand-sage-light px-3 py-1.5 text-xs font-semibold text-brand-sage">
+            {activeDayCount} booked days
+          </span>
+          <span className="rounded-full bg-brand-text px-3 py-1.5 text-xs font-semibold text-white">
+            {moneyFormatter.format(monthlyRevenue)}
+          </span>
+        </div>
       </div>
 
-      <div className="grid grid-cols-7 border-b border-brand-border pb-2">
+      <div className="mb-2 grid grid-cols-7 gap-2">
         {monthWeekdays.map((day) => (
-          <div key={day} className="text-center text-xs font-semibold uppercase tracking-[0.12em] text-brand-muted">
+          <div
+            key={day}
+            className="rounded-full bg-brand-bg px-2 py-2 text-center text-xs font-semibold uppercase tracking-[0.12em] text-brand-muted"
+          >
             {day}
           </div>
         ))}
       </div>
 
-      <div className="grid grid-cols-7 gap-px overflow-hidden rounded-2xl bg-brand-border">
+      <div className="grid grid-cols-7 gap-2">
         {days.map((day) => {
           const key = getLocalDateKey(day)
           const dayBookings = bookingsByDay[key] || []
@@ -1975,33 +1996,62 @@ function MonthView({ bookings }: { bookings: Booking[] }) {
           const revenue = activeBookings.reduce((sum, booking) => sum + Number(booking.total_price || 0), 0)
           const inMonth = isSameMonth(day, monthStart)
           const isToday = key === todayKey
+          const dayHours = monthlyWorkingHours.find((row) => row.day_of_week === day.getDay())
+          const closed = !workingHoursLoading && !dayHours?.is_open
+          const hasBookings = dayBookings.length > 0
+          const cellClass = hasBookings
+            ? 'border-[#cfdcc8] bg-[#f1f6ee] shadow-[inset_0_0_0_1px_rgba(143,161,127,0.10)]'
+            : closed
+              ? 'border-[#e4e4df] bg-[#f4f4f1] text-stone-400'
+              : 'border-[#edf0ea] bg-[#fbfcfa]'
 
           return (
             <div
               key={key}
-              className={`min-h-28 bg-white p-3 ${inMonth ? '' : 'opacity-45'} ${
-                isToday ? 'ring-2 ring-inset ring-brand-sage' : ''
+              className={`min-h-32 rounded-2xl border p-3 transition ${
+                inMonth ? cellClass : 'border-transparent bg-transparent opacity-35'
+              } ${
+                isToday ? 'ring-2 ring-brand-sage ring-offset-2 ring-offset-white' : ''
               }`}
             >
               <div className="flex items-center justify-between gap-2">
                 <span
                   className={`flex h-7 w-7 items-center justify-center rounded-full text-sm font-semibold ${
-                    isToday ? 'bg-brand-sage text-white' : 'text-brand-text'
+                    isToday
+                      ? 'bg-brand-sage text-white'
+                      : closed && inMonth
+                        ? 'bg-white/60 text-stone-400'
+                        : 'text-brand-text'
                   }`}
                 >
                   {format(day, 'd')}
                 </span>
+                {inMonth && (
+                  <span
+                    className={`h-2 w-2 rounded-full ${
+                      hasBookings ? 'bg-brand-sage' : closed ? 'bg-stone-300' : 'bg-brand-border'
+                    }`}
+                  />
+                )}
               </div>
 
-              {dayBookings.length > 0 ? (
-                <div className="mt-4 space-y-1">
-                  <p className="text-xs font-semibold text-brand-text">
+              {inMonth && hasBookings ? (
+                <div className="mt-5 grid gap-2">
+                  <span className="w-fit rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-brand-text shadow-sm ring-1 ring-[#dfe6da]">
                     {dayBookings.length} {dayBookings.length === 1 ? 'booking' : 'bookings'}
-                  </p>
-                  <p className="text-xs font-semibold text-brand-sage">{moneyFormatter.format(revenue)}</p>
+                  </span>
+                  <span className="w-fit rounded-full bg-brand-text px-2.5 py-1 text-xs font-semibold text-white shadow-sm">
+                    {moneyFormatter.format(revenue)}
+                  </span>
+                </div>
+              ) : inMonth && closed ? (
+                <div className="mt-5">
+                  <span className="w-fit rounded-full bg-white/70 px-2.5 py-1 text-xs font-semibold text-stone-400">
+                    Closed
+                  </span>
                 </div>
               ) : (
-                <p className="mt-4 text-xs text-brand-muted">No bookings</p>
+                null
               )}
             </div>
           )
