@@ -23,8 +23,23 @@ import { useWorkingHours } from '../hooks/useWorkingHours'
 import { getLocalToday } from '../utils/time'
 import type { BlockedDate, Booking, WorkingHours } from '../types'
 
-type AdminView = 'today' | 'week' | 'month' | 'list' | 'settings'
+type AdminView = 'today' | 'week' | 'month' | 'list' | 'settings' | 'clients'
 type StatusFilter = 'all' | Booking['status']
+type ClientBooking = Pick<
+  Booking,
+  'id' | 'client_name' | 'client_phone' | 'status' | 'start_time' | 'end_time' | 'total_price' | 'notes' | 'created_at'
+> & {
+  booking_services?: Booking['booking_services']
+}
+
+interface ClientProfile {
+  id: string
+  name: string
+  phone: string
+  notes: string | null
+  created_at: string
+  bookings?: ClientBooking[]
+}
 
 const viewTabs: { value: AdminView; label: string }[] = [
   { value: 'today', label: 'Today' },
@@ -32,6 +47,7 @@ const viewTabs: { value: AdminView; label: string }[] = [
   { value: 'month', label: 'Month' },
   { value: 'list', label: 'List' },
   { value: 'settings', label: 'Settings' },
+  { value: 'clients', label: 'Clients' },
 ]
 
 const statusFilters: { value: StatusFilter; label: string }[] = [
@@ -88,6 +104,10 @@ function canUpdateStatus(booking: Booking) {
 
 function canReschedule(booking: Booking) {
   return booking.status === 'pending' || booking.status === 'confirmed'
+}
+
+function isBookingView(view: AdminView) {
+  return view === 'today' || view === 'week' || view === 'month' || view === 'list'
 }
 
 function getBookingValue(bookings: Booking[]) {
@@ -557,7 +577,7 @@ export default function AdminPage() {
                   key={item.value}
                   onClick={() => {
                     setView(item.value)
-                    if (item.value !== 'settings') {
+                    if (isBookingView(item.value)) {
                       void fetchBookings(item.value)
                     }
                   }}
@@ -572,7 +592,7 @@ export default function AdminPage() {
               ))}
             </div>
 
-            {view !== 'settings' && (
+            {isBookingView(view) && (
               <div className="rounded-3xl border border-brand-border/80 bg-brand-bg/70 p-3 lg:min-w-[36rem]">
                 <p className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-brand-sage">
                   Find bookings
@@ -610,6 +630,8 @@ export default function AdminPage() {
         <section className="mt-5">
           {view === 'settings' ? (
             <SettingsView />
+          ) : view === 'clients' ? (
+            <ClientsView onSaved={(message) => setSuccessMessage(message)} />
           ) : loading ? (
             <div className="grid gap-3">
               {[1, 2, 3].map((item) => (
@@ -667,6 +689,265 @@ export default function AdminPage() {
           onRescheduled={handleRescheduled}
         />
       )}
+    </div>
+  )
+}
+
+function sortClientBookings(bookings: ClientBooking[] = []) {
+  return [...bookings].sort(
+    (first, second) => parseISO(second.start_time).getTime() - parseISO(first.start_time).getTime()
+  )
+}
+
+function ClientsView({ onSaved }: { onSaved: (message: string) => void }) {
+  const [clients, setClients] = useState<ClientProfile[]>([])
+  const [loadingClients, setLoadingClients] = useState(true)
+  const [search, setSearch] = useState('')
+  const [expandedClientId, setExpandedClientId] = useState<string | null>(null)
+  const [notesDrafts, setNotesDrafts] = useState<Record<string, string>>({})
+  const [savingClientId, setSavingClientId] = useState<string | null>(null)
+  const [errorMessage, setErrorMessage] = useState('')
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function fetchClients() {
+      setLoadingClients(true)
+      setErrorMessage('')
+
+      const { data, error } = await supabase
+        .from('clients')
+        .select(
+          'id,name,phone,notes,created_at,bookings(id,client_name,client_phone,status,start_time,end_time,total_price,notes,created_at,booking_services(name_at_booking,is_primary,price_at_booking))'
+        )
+        .order('name')
+
+      if (cancelled) return
+
+      if (error) {
+        setClients([])
+        setNotesDrafts({})
+        setErrorMessage('Could not load clients. Please refresh and try again.')
+      } else {
+        const nextClients = ((data as ClientProfile[]) || []).map((client) => ({
+          ...client,
+          bookings: sortClientBookings(client.bookings),
+        }))
+
+        setClients(nextClients)
+        setNotesDrafts(
+          nextClients.reduce<Record<string, string>>((drafts, client) => {
+            drafts[client.id] = client.notes || ''
+            return drafts
+          }, {})
+        )
+      }
+
+      setLoadingClients(false)
+    }
+
+    void fetchClients()
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const visibleClients = useMemo(() => {
+    const normalizedSearch = search.trim().toLowerCase()
+
+    if (!normalizedSearch) return clients
+
+    return clients.filter(
+      (client) =>
+        client.name.toLowerCase().includes(normalizedSearch) ||
+        client.phone.toLowerCase().includes(normalizedSearch) ||
+        (client.notes || '').toLowerCase().includes(normalizedSearch)
+    )
+  }, [clients, search])
+
+  const saveNotes = async (client: ClientProfile) => {
+    setSavingClientId(client.id)
+    setErrorMessage('')
+
+    const nextNotes = notesDrafts[client.id]?.trim() || null
+    const { data, error } = await supabase
+      .from('clients')
+      .update({ notes: nextNotes })
+      .eq('id', client.id)
+      .select('id,notes')
+      .single()
+
+    if (error || !data) {
+      setErrorMessage('Could not save client notes. Please try again.')
+      setSavingClientId(null)
+      return
+    }
+
+    setClients((current) =>
+      current.map((item) => (item.id === client.id ? { ...item, notes: data.notes } : item))
+    )
+    setNotesDrafts((current) => ({ ...current, [client.id]: data.notes || '' }))
+    onSaved('Client notes saved.')
+    setSavingClientId(null)
+  }
+
+  if (loadingClients) {
+    return (
+      <div className="grid gap-3">
+        {[1, 2, 3].map((item) => (
+          <div
+            key={item}
+            className="h-32 animate-pulse rounded-3xl border border-white bg-white shadow-[0_12px_40px_rgba(44,44,44,0.05)]"
+          />
+        ))}
+      </div>
+    )
+  }
+
+  return (
+    <div className="grid gap-4">
+      <section className="rounded-3xl border border-white bg-white p-5 shadow-[0_12px_40px_rgba(44,44,44,0.05)]">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-brand-sage">
+              Clients
+            </p>
+            <h2 className="text-xl font-semibold text-brand-text">Client Profiles</h2>
+            <p className="mt-2 text-sm leading-6 text-brand-muted">
+              Review booking history and keep private admin notes for returning clients.
+            </p>
+          </div>
+          <label className="block lg:min-w-96">
+            <span className="sr-only">Search clients</span>
+            <input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search by name, phone, or notes"
+              className="w-full rounded-2xl border border-brand-border bg-brand-bg px-4 py-3 text-sm outline-none transition focus:border-brand-sage focus:ring-4 focus:ring-brand-sage-light"
+            />
+          </label>
+        </div>
+      </section>
+
+      {errorMessage && (
+        <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+          {errorMessage}
+        </div>
+      )}
+
+      {visibleClients.length === 0 ? (
+        <div className="rounded-3xl border border-dashed border-brand-border bg-white px-6 py-14 text-center">
+          <h2 className="text-xl font-semibold text-brand-text">No clients found</h2>
+          <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-brand-muted">
+            Client profiles will appear here after bookings are linked to phone numbers.
+          </p>
+        </div>
+      ) : (
+        <div className="grid gap-3">
+          {visibleClients.map((client) => {
+            const bookings = sortClientBookings(client.bookings)
+            const lastBooking = bookings[0]
+            const expanded = expandedClientId === client.id
+            const bookingCountLabel = `${bookings.length} ${bookings.length === 1 ? 'booking' : 'bookings'}`
+
+            return (
+              <section
+                key={client.id}
+                className="rounded-3xl border border-white bg-white p-5 shadow-[0_12px_40px_rgba(44,44,44,0.05)]"
+              >
+                <button
+                  onClick={() => setExpandedClientId(expanded ? null : client.id)}
+                  className="grid w-full gap-4 text-left lg:grid-cols-[minmax(0,1.2fr)_10rem_12rem_auto] lg:items-center"
+                >
+                  <div className="min-w-0">
+                    <h3 className="truncate text-lg font-semibold text-brand-text">{client.name}</h3>
+                    <a
+                      href={`tel:${client.phone}`}
+                      onClick={(event) => event.stopPropagation()}
+                      className="mt-1 block text-sm text-brand-muted hover:text-brand-text"
+                    >
+                      {client.phone}
+                    </a>
+                  </div>
+                  <Detail label="Bookings" value={bookingCountLabel} />
+                  <Detail
+                    label="Last booking"
+                    value={lastBooking ? format(parseISO(lastBooking.start_time), 'EEE, d MMM') : 'None'}
+                  />
+                  <span className="rounded-xl bg-brand-bg px-3 py-2 text-center text-xs font-semibold text-brand-sage">
+                    {expanded ? 'Hide history' : 'View history'}
+                  </span>
+                </button>
+
+                <div className="mt-4 rounded-2xl bg-brand-bg p-4">
+                  <label className="block">
+                    <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-brand-muted">
+                      Notes
+                    </span>
+                    <textarea
+                      value={notesDrafts[client.id] || ''}
+                      onChange={(event) =>
+                        setNotesDrafts((current) => ({ ...current, [client.id]: event.target.value }))
+                      }
+                      rows={3}
+                      placeholder="Add private client notes"
+                      className="w-full resize-none rounded-2xl border border-brand-border bg-white px-4 py-3 text-sm text-brand-text outline-none transition focus:border-brand-sage focus:ring-4 focus:ring-brand-sage-light"
+                    />
+                  </label>
+                  <div className="mt-3 flex justify-end">
+                    <ActionButton
+                      disabled={savingClientId === client.id}
+                      onClick={() => void saveNotes(client)}
+                    >
+                      Save Notes
+                    </ActionButton>
+                  </div>
+                </div>
+
+                {expanded && (
+                  <div className="mt-4 border-t border-brand-border pt-4">
+                    <p className="mb-3 text-xs font-semibold uppercase tracking-[0.14em] text-brand-sage">
+                      Booking history
+                    </p>
+                    {bookings.length === 0 ? (
+                      <p className="rounded-2xl border border-dashed border-brand-border bg-brand-bg px-4 py-5 text-sm text-brand-muted">
+                        No booking history yet.
+                      </p>
+                    ) : (
+                      <div className="grid gap-2">
+                        {bookings.map((booking) => (
+                          <ClientBookingHistoryRow key={booking.id} booking={booking} />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </section>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ClientBookingHistoryRow({ booking }: { booking: ClientBooking }) {
+  const start = parseISO(booking.start_time)
+
+  return (
+    <div className="grid gap-3 rounded-2xl bg-brand-bg px-4 py-3 sm:grid-cols-[10rem_minmax(0,1fr)_8rem_7rem] sm:items-center">
+      <div>
+        <p className="text-sm font-semibold text-brand-text">{format(start, 'EEE, d MMM')}</p>
+        <p className="mt-1 text-xs text-brand-muted">{format(start, 'HH:mm')}</p>
+      </div>
+      <p className="min-w-0 truncate text-sm font-semibold text-brand-text">{getPrimaryService(booking)}</p>
+      <span className={`w-fit rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ${statusStyles[booking.status]}`}>
+        {statusLabels[booking.status]}
+      </span>
+      <p className="text-sm font-semibold text-brand-sage">
+        {moneyFormatter.format(Number(booking.total_price || 0))}
+      </p>
     </div>
   )
 }

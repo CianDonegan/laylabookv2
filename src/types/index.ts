@@ -28,6 +28,7 @@ export interface BlockedDate {
 
 export interface Booking {
   id: string
+  client_id?: string | null
   client_name: string
   client_phone: string
   status: 'pending' | 'confirmed' | 'cancelled' | 'completed' | 'no_show'
