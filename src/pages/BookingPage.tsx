@@ -127,8 +127,8 @@ export default function BookingPage() {
   if (submitted) return <SuccessView />
 
   return (
-    <div className="min-h-screen bg-brand-bg">
-      <div className="max-w-2xl mx-auto px-4 pt-6 pb-12">
+    <div className="min-h-screen bg-[#f7f8f4]">
+      <div className="max-w-2xl mx-auto px-4 pt-8 pb-14">
         <Hero />
         <PolicyCard onAccept={() => setPolicyAccepted(true)} />
 
@@ -213,7 +213,7 @@ function FlowNotice({
 }) {
   return (
     <div
-      className={`mb-4 rounded-3xl border px-6 py-5 shadow-sm ${
+      className={`mb-4 rounded-[2rem] border px-6 py-5 shadow-[0_12px_40px_rgba(44,44,44,0.05)] ${
         tone === 'error'
           ? 'border-red-100 bg-red-50 text-red-700'
           : 'border-brand-border bg-white text-brand-text'

@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import {
   addDays,
@@ -8,16 +8,17 @@ import {
   endOfMonth,
   endOfWeek,
   format,
+  isSameDay,
   isSameMonth,
   parseISO,
   startOfMonth,
   startOfWeek,
 } from 'date-fns'
-import type { Booking } from '../types'
+import type { BlockedDate, Booking, WorkingHours } from '../types'
 
 const ADMIN_PASSWORD = 'layla2026'
 
-type AdminView = 'today' | 'week' | 'month' | 'list'
+type AdminView = 'today' | 'week' | 'month' | 'list' | 'settings'
 type StatusFilter = 'all' | Booking['status']
 
 const viewTabs: { value: AdminView; label: string }[] = [
@@ -25,6 +26,7 @@ const viewTabs: { value: AdminView; label: string }[] = [
   { value: 'week', label: 'Week' },
   { value: 'month', label: 'Month' },
   { value: 'list', label: 'List' },
+  { value: 'settings', label: 'Settings' },
 ]
 
 const statusFilters: { value: StatusFilter; label: string }[] = [
@@ -71,6 +73,20 @@ function isActiveBooking(booking: Booking) {
   return booking.status === 'pending' || booking.status === 'confirmed'
 }
 
+function isValueActiveBooking(booking: Booking) {
+  return booking.status !== 'cancelled' && booking.status !== 'no_show'
+}
+
+function canUpdateStatus(booking: Booking) {
+  return booking.status === 'pending' || booking.status === 'confirmed'
+}
+
+function getBookingValue(bookings: Booking[]) {
+  return bookings
+    .filter(isValueActiveBooking)
+    .reduce((sum, booking) => sum + Number(booking.total_price || 0), 0)
+}
+
 function getDurationMinutes(booking: Booking) {
   return Math.max(0, differenceInMinutes(parseISO(booking.end_time), parseISO(booking.start_time)))
 }
@@ -103,10 +119,47 @@ function getLocalDayStart(date = new Date()) {
   return start
 }
 
+function mergeBookings(existing: Booking[], incoming: Booking[]) {
+  const byId = new Map(existing.map((booking) => [booking.id, booking]))
+
+  incoming.forEach((booking) => byId.set(booking.id, booking))
+
+  return [...byId.values()].sort(
+    (first, second) => parseISO(first.start_time).getTime() - parseISO(second.start_time).getTime()
+  )
+}
+
+const orderedWorkingDays = [1, 2, 3, 4, 5, 6, 0]
+const shortDayNames: Record<number, string> = {
+  0: 'Sun',
+  1: 'Mon',
+  2: 'Tue',
+  3: 'Wed',
+  4: 'Thu',
+  5: 'Fri',
+  6: 'Sat',
+}
+
+function normalizeTimeInput(value: string) {
+  return value.slice(0, 5)
+}
+
+function sortWorkingHours(hours: WorkingHours[]) {
+  return [...hours].sort(
+    (first, second) =>
+      orderedWorkingDays.indexOf(first.day_of_week) - orderedWorkingDays.indexOf(second.day_of_week)
+  )
+}
+
+function sortBlockedDates(dates: BlockedDate[]) {
+  return [...dates].sort((first, second) => first.date.localeCompare(second.date))
+}
+
 export default function AdminPage() {
   const [password, setPassword] = useState('')
   const [authenticated, setAuthenticated] = useState(false)
   const [bookings, setBookings] = useState<Booking[]>([])
+  const [knownBookings, setKnownBookings] = useState<Booking[]>([])
   const [loading, setLoading] = useState(true)
   const [view, setView] = useState<AdminView>('today')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
@@ -143,7 +196,9 @@ export default function AdminPage() {
       setErrorMessage('Could not load bookings. Please try again.')
       setBookings([])
     } else {
-      setBookings((data as Booking[]) || [])
+      const nextBookings = (data as Booking[]) || []
+      setBookings(nextBookings)
+      setKnownBookings((current) => mergeBookings(current, nextBookings))
     }
 
     setLoading(false)
@@ -202,16 +257,38 @@ export default function AdminPage() {
   }, [bookings, search, statusFilter])
 
   const stats = useMemo(() => {
-    const activeBookings = bookings.filter(isActiveBooking)
-    const revenue = activeBookings.reduce((sum, booking) => sum + Number(booking.total_price || 0), 0)
+    const todayStart = getLocalDayStart()
+    const tomorrowStart = addDays(todayStart, 1)
+    const weekEnd = addDays(todayStart, 7)
+    const statsSource = knownBookings.length > 0 ? knownBookings : bookings
+    const todayBookings = statsSource.filter((booking) => {
+      const startTime = parseISO(booking.start_time).getTime()
+      return startTime >= todayStart.getTime() && startTime < tomorrowStart.getTime()
+    })
+    const weekBookings = statsSource.filter((booking) => {
+      const startTime = parseISO(booking.start_time).getTime()
+      return startTime >= todayStart.getTime() && startTime < weekEnd.getTime()
+    })
 
     return {
       total: bookings.length,
       pending: bookings.filter((booking) => booking.status === 'pending').length,
       confirmed: bookings.filter((booking) => booking.status === 'confirmed').length,
-      revenue,
+      revenue: getBookingValue(bookings),
+      todayRevenue: getBookingValue(todayBookings),
+      weekRevenue: getBookingValue(weekBookings),
     }
-  }, [bookings])
+  }, [bookings, knownBookings])
+
+  const nextUpcomingBooking = useMemo(() => {
+    const tomorrowStart = addDays(getLocalDayStart(), 1)
+
+    return knownBookings.find(
+      (booking) =>
+        isValueActiveBooking(booking) &&
+        parseISO(booking.start_time).getTime() >= tomorrowStart.getTime()
+    )
+  }, [knownBookings])
 
   const todaySummary = useMemo(() => {
     const activeBookings = visibleBookings.filter(isActiveBooking)
@@ -287,12 +364,14 @@ export default function AdminPage() {
           </div>
 
           <div className="flex flex-wrap gap-2">
-            <button
-              onClick={() => void fetchBookings()}
-              className="rounded-2xl border border-brand-border bg-white px-4 py-2.5 text-sm font-medium text-brand-text shadow-sm transition hover:border-brand-sage"
-            >
-              Refresh
-            </button>
+            {view !== 'settings' && (
+              <button
+                onClick={() => void fetchBookings()}
+                className="rounded-2xl border border-brand-border bg-white px-4 py-2.5 text-sm font-medium text-brand-text shadow-sm transition hover:border-brand-sage"
+              >
+                Refresh
+              </button>
+            )}
             <button
               onClick={() => setAuthenticated(false)}
               className="rounded-2xl bg-brand-text px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-black"
@@ -310,22 +389,44 @@ export default function AdminPage() {
           </div>
         )}
 
-        <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
           <StatCard label="Bookings" value={stats.total} detail={`${visibleBookings.length} showing`} />
-          <StatCard label="Pending" value={stats.pending} detail="Awaiting confirmation" />
+          <StatCard
+            label="Pending"
+            value={stats.pending}
+            detail={stats.pending > 0 ? 'Needs action' : 'Awaiting confirmation'}
+            highlighted={stats.pending > 0}
+            badge={stats.pending > 0 ? 'Needs action' : undefined}
+          />
           <StatCard label="Confirmed" value={stats.confirmed} detail="Ready to go" />
-          <StatCard label="Active value" value={moneyFormatter.format(stats.revenue)} detail="Pending and confirmed" />
+          <StatCard
+            label="Today Revenue"
+            value={moneyFormatter.format(stats.todayRevenue)}
+            detail="Excludes inactive"
+          />
+          <StatCard
+            label="Week Revenue"
+            value={moneyFormatter.format(stats.weekRevenue)}
+            detail="Next 7 days"
+          />
+          <StatCard
+            label="Active Value"
+            value={moneyFormatter.format(stats.revenue)}
+            detail="Excludes cancelled/no-show"
+          />
         </section>
 
         <section className="mt-6 rounded-3xl border border-white bg-white p-4 shadow-[0_18px_50px_rgba(44,44,44,0.06)]">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div className="flex rounded-2xl bg-brand-bg p-1">
+            <div className="flex flex-wrap rounded-2xl bg-brand-bg p-1">
               {viewTabs.map((item) => (
                 <button
                   key={item.value}
                   onClick={() => {
                     setView(item.value)
-                    void fetchBookings(item.value)
+                    if (item.value !== 'settings') {
+                      void fetchBookings(item.value)
+                    }
                   }}
                   className={`rounded-xl px-4 py-2 text-sm font-medium transition ${
                     view === item.value
@@ -338,30 +439,45 @@ export default function AdminPage() {
               ))}
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_12rem] lg:min-w-[34rem]">
-              <input
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="Search by name, phone, or service"
-                className="w-full rounded-2xl border border-brand-border bg-brand-bg px-4 py-2.5 text-sm outline-none transition focus:border-brand-sage focus:ring-4 focus:ring-brand-sage-light"
-              />
-              <select
-                value={statusFilter}
-                onChange={(event) => setStatusFilter(event.target.value as StatusFilter)}
-                className="w-full rounded-2xl border border-brand-border bg-brand-bg px-4 py-2.5 text-sm outline-none transition focus:border-brand-sage focus:ring-4 focus:ring-brand-sage-light"
-              >
-                {statusFilters.map((item) => (
-                  <option key={item.value} value={item.value}>
-                    {item.label}
-                  </option>
-                ))}
-              </select>
-            </div>
+            {view !== 'settings' && (
+              <div className="rounded-3xl border border-brand-border/80 bg-brand-bg/70 p-3 lg:min-w-[36rem]">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-brand-sage">
+                  Find bookings
+                </p>
+                <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_12rem]">
+                  <label className="block">
+                    <span className="sr-only">Search bookings</span>
+                    <input
+                      value={search}
+                      onChange={(event) => setSearch(event.target.value)}
+                      placeholder="Search by name, phone, or service"
+                      className="w-full rounded-2xl border border-brand-border bg-white px-4 py-3 text-sm outline-none transition focus:border-brand-sage focus:ring-4 focus:ring-brand-sage-light"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="sr-only">Filter by status</span>
+                    <select
+                      value={statusFilter}
+                      onChange={(event) => setStatusFilter(event.target.value as StatusFilter)}
+                      className="w-full rounded-2xl border border-brand-border bg-white px-4 py-3 text-sm outline-none transition focus:border-brand-sage focus:ring-4 focus:ring-brand-sage-light"
+                    >
+                      {statusFilters.map((item) => (
+                        <option key={item.value} value={item.value}>
+                          {item.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+              </div>
+            )}
           </div>
         </section>
 
         <section className="mt-5">
-          {loading ? (
+          {view === 'settings' ? (
+            <SettingsView />
+          ) : loading ? (
             <div className="grid gap-3">
               {[1, 2, 3].map((item) => (
                 <div
@@ -371,9 +487,15 @@ export default function AdminPage() {
               ))}
             </div>
           ) : view === 'week' ? (
-            <WeekView bookings={visibleBookings} />
+            <WeekView
+              bookings={visibleBookings}
+              updatingId={updatingId}
+              onUpdateStatus={updateStatus}
+            />
           ) : view === 'month' ? (
             <MonthView bookings={visibleBookings} />
+          ) : view === 'today' && bookings.length === 0 ? (
+            <TodayEmptyState nextBooking={nextUpcomingBooking} />
           ) : visibleBookings.length === 0 ? (
             <div className="rounded-3xl border border-dashed border-brand-border bg-white px-6 py-14 text-center">
               <h2 className="text-xl font-semibold text-brand-text">No bookings found</h2>
@@ -391,21 +513,465 @@ export default function AdminPage() {
                   onUpdateStatus={updateStatus}
                 />
               ) : (
-                <div className="grid gap-3">
-                  {visibleBookings.map((booking) => (
-                    <BookingCard
-                      key={booking.id}
-                      booking={booking}
-                      updating={updatingId === booking.id}
-                      onUpdateStatus={updateStatus}
-                    />
-                  ))}
-                </div>
+                <ListView
+                  bookings={visibleBookings}
+                  updatingId={updatingId}
+                  onUpdateStatus={updateStatus}
+                />
               )}
             </>
           )}
         </section>
       </main>
+    </div>
+  )
+}
+
+function SettingsView() {
+  const [workingHours, setWorkingHours] = useState<WorkingHours[]>([])
+  const [loadingHours, setLoadingHours] = useState(true)
+  const [savingHours, setSavingHours] = useState(false)
+  const [workingHoursMessage, setWorkingHoursMessage] = useState<{
+    tone: 'success' | 'error'
+    text: string
+  } | null>(null)
+  const [blockedDates, setBlockedDates] = useState<BlockedDate[]>([])
+  const [loadingBlockedDates, setLoadingBlockedDates] = useState(true)
+  const [savingBlockedDate, setSavingBlockedDate] = useState(false)
+  const [removingBlockedDate, setRemovingBlockedDate] = useState<string | null>(null)
+  const [newBlockedDate, setNewBlockedDate] = useState('')
+  const [newBlockedReason, setNewBlockedReason] = useState('')
+  const [blockedDatesMessage, setBlockedDatesMessage] = useState<{
+    tone: 'success' | 'error'
+    text: string
+  } | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function fetchWorkingHours() {
+      setLoadingHours(true)
+      setWorkingHoursMessage(null)
+
+      const { data, error } = await supabase
+        .from('working_hours')
+        .select('*')
+        .order('day_of_week')
+
+      if (cancelled) return
+
+      if (error) {
+        setWorkingHours([])
+        setWorkingHoursMessage({
+          tone: 'error',
+          text: 'Could not load working hours. Please refresh and try again.',
+        })
+      } else {
+        setWorkingHours(
+          sortWorkingHours(
+            ((data as WorkingHours[]) || []).map((row) => ({
+              ...row,
+              start_time: normalizeTimeInput(row.start_time),
+              end_time: normalizeTimeInput(row.end_time),
+            }))
+          )
+        )
+      }
+
+      setLoadingHours(false)
+    }
+
+    void fetchWorkingHours()
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function fetchBlockedDates() {
+      setLoadingBlockedDates(true)
+      setBlockedDatesMessage(null)
+
+      const { data, error } = await supabase
+        .from('blocked_dates')
+        .select('date,reason')
+        .gte('date', getLocalDateKey(new Date()))
+        .order('date')
+
+      if (cancelled) return
+
+      if (error) {
+        setBlockedDates([])
+        setBlockedDatesMessage({
+          tone: 'error',
+          text: 'Could not load days off. Please refresh and try again.',
+        })
+      } else {
+        setBlockedDates(sortBlockedDates((data as BlockedDate[]) || []))
+      }
+
+      setLoadingBlockedDates(false)
+    }
+
+    void fetchBlockedDates()
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const updateWorkingHour = (dayOfWeek: number, updates: Partial<WorkingHours>) => {
+    setWorkingHours((current) =>
+      current.map((row) => (row.day_of_week === dayOfWeek ? { ...row, ...updates } : row))
+    )
+    setWorkingHoursMessage(null)
+  }
+
+  const saveWorkingHours = async () => {
+    const invalidDay = workingHours.find(
+      (row) => row.is_open && normalizeTimeInput(row.start_time) >= normalizeTimeInput(row.end_time)
+    )
+
+    if (invalidDay) {
+      setWorkingHoursMessage({
+        tone: 'error',
+        text: `${invalidDay.day_name} needs an end time later than the start time.`,
+      })
+      return
+    }
+
+    setSavingHours(true)
+    setWorkingHoursMessage(null)
+
+    const results = await Promise.all(
+      workingHours.map((row) =>
+        supabase
+          .from('working_hours')
+          .update({
+            is_open: row.is_open,
+            start_time: normalizeTimeInput(row.start_time),
+            end_time: normalizeTimeInput(row.end_time),
+            slot_interval_minutes: row.slot_interval_minutes,
+          })
+          .eq('day_of_week', row.day_of_week)
+          .select('day_of_week')
+      )
+    )
+
+    const failedResult = results.find((result) => result.error)
+    const missingRow = results.some((result) => !result.data || result.data.length === 0)
+
+    if (failedResult?.error || missingRow) {
+      setWorkingHoursMessage({
+        tone: 'error',
+        text: 'Could not save working hours. Please try again.',
+      })
+    } else {
+      setWorkingHours((current) => sortWorkingHours(current))
+      setWorkingHoursMessage({
+        tone: 'success',
+        text: 'Working hours saved.',
+      })
+    }
+
+    setSavingHours(false)
+  }
+
+  const addBlockedDate = async () => {
+    if (!newBlockedDate) {
+      setBlockedDatesMessage({
+        tone: 'error',
+        text: 'Choose a date to block.',
+      })
+      return
+    }
+
+    if (blockedDates.some((blockedDate) => blockedDate.date === newBlockedDate)) {
+      setBlockedDatesMessage({
+        tone: 'error',
+        text: 'That date is already blocked.',
+      })
+      return
+    }
+
+    setSavingBlockedDate(true)
+    setBlockedDatesMessage(null)
+
+    const nextBlockedDate = {
+      date: newBlockedDate,
+      reason: newBlockedReason.trim() || null,
+    }
+    const { data, error } = await supabase
+      .from('blocked_dates')
+      .insert(nextBlockedDate)
+      .select('date,reason')
+      .single()
+
+    if (error || !data) {
+      setBlockedDatesMessage({
+        tone: 'error',
+        text: 'Could not add this day off. Please try again.',
+      })
+    } else {
+      setBlockedDates((current) => sortBlockedDates([...current, data as BlockedDate]))
+      setNewBlockedDate('')
+      setNewBlockedReason('')
+      setBlockedDatesMessage({
+        tone: 'success',
+        text: 'Day off added.',
+      })
+    }
+
+    setSavingBlockedDate(false)
+  }
+
+  const removeBlockedDate = async (date: string) => {
+    setRemovingBlockedDate(date)
+    setBlockedDatesMessage(null)
+
+    const { error } = await supabase.from('blocked_dates').delete().eq('date', date)
+
+    if (error) {
+      setBlockedDatesMessage({
+        tone: 'error',
+        text: 'Could not remove this day off. Please try again.',
+      })
+    } else {
+      setBlockedDates((current) => current.filter((blockedDate) => blockedDate.date !== date))
+      setBlockedDatesMessage({
+        tone: 'success',
+        text: 'Day off removed.',
+      })
+    }
+
+    setRemovingBlockedDate(null)
+  }
+
+  return (
+    <div className="grid gap-4 lg:grid-cols-2">
+      <section className="rounded-3xl border border-white bg-white p-6 shadow-[0_12px_40px_rgba(44,44,44,0.05)]">
+        <p className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-brand-sage">
+          Settings
+        </p>
+        <h2 className="text-xl font-semibold text-brand-text">Working hours</h2>
+        <p className="mt-2 text-sm leading-6 text-brand-muted">
+          Set the weekly days and times clients can book.
+        </p>
+
+        <div className="mt-5 grid gap-2.5">
+          {loadingHours ? (
+            <div className="grid gap-2.5">
+              {[1, 2, 3, 4, 5, 6, 7].map((item) => (
+                <div key={item} className="h-16 animate-pulse rounded-2xl bg-brand-bg" />
+              ))}
+            </div>
+          ) : workingHours.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-brand-border bg-brand-bg px-4 py-5 text-sm text-brand-muted">
+              No working hours are available yet.
+            </div>
+          ) : (
+            workingHours.map((row) => (
+              <div
+                key={row.day_of_week}
+                className={`grid gap-3 rounded-2xl border px-4 py-3 transition sm:grid-cols-[5.5rem_auto_minmax(0,1fr)] sm:items-center ${
+                  row.is_open
+                    ? 'border-brand-border bg-brand-bg'
+                    : 'border-stone-200 bg-stone-50 text-stone-400'
+                }`}
+              >
+                <div>
+                  <p className="text-sm font-semibold text-brand-text">
+                    {shortDayNames[row.day_of_week] || row.day_name.slice(0, 3)}
+                  </p>
+                  <p className="mt-0.5 text-xs text-brand-muted">{row.day_name}</p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => updateWorkingHour(row.day_of_week, { is_open: !row.is_open })}
+                  className={`w-fit rounded-full px-3 py-1.5 text-xs font-semibold ring-1 transition ${
+                    row.is_open
+                      ? 'bg-brand-sage-light text-brand-sage ring-brand-border'
+                      : 'bg-white text-stone-500 ring-stone-200'
+                  }`}
+                >
+                  {row.is_open ? 'Open' : 'Closed'}
+                </button>
+
+                {row.is_open ? (
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <label className="block">
+                      <span className="mb-1 block text-xs font-medium text-brand-muted">Start</span>
+                      <input
+                        type="time"
+                        value={normalizeTimeInput(row.start_time)}
+                        onChange={(event) =>
+                          updateWorkingHour(row.day_of_week, { start_time: event.target.value })
+                        }
+                        className="w-full rounded-2xl border border-brand-border bg-white px-3 py-2 text-sm font-medium text-brand-text outline-none transition focus:border-brand-sage focus:ring-4 focus:ring-brand-sage-light"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="mb-1 block text-xs font-medium text-brand-muted">End</span>
+                      <input
+                        type="time"
+                        value={normalizeTimeInput(row.end_time)}
+                        onChange={(event) =>
+                          updateWorkingHour(row.day_of_week, { end_time: event.target.value })
+                        }
+                        className="w-full rounded-2xl border border-brand-border bg-white px-3 py-2 text-sm font-medium text-brand-text outline-none transition focus:border-brand-sage focus:ring-4 focus:ring-brand-sage-light"
+                      />
+                    </label>
+                  </div>
+                ) : (
+                  <p className="rounded-2xl border border-stone-200 bg-white px-3 py-2 text-sm font-medium text-stone-500">
+                    Closed for bookings
+                  </p>
+                )}
+              </div>
+            ))
+          )}
+        </div>
+
+        {workingHoursMessage && (
+          <p
+            className={`mt-4 rounded-2xl px-4 py-3 text-sm font-medium ${
+              workingHoursMessage.tone === 'success'
+                ? 'bg-brand-sage-light text-brand-sage'
+                : 'bg-rose-50 text-rose-700'
+            }`}
+          >
+            {workingHoursMessage.text}
+          </p>
+        )}
+
+        <div className="mt-5 flex justify-end">
+          <button
+            type="button"
+            onClick={() => void saveWorkingHours()}
+            disabled={loadingHours || savingHours || workingHours.length === 0}
+            className="rounded-2xl bg-brand-text px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-black disabled:cursor-not-allowed disabled:bg-stone-200 disabled:text-stone-500"
+          >
+            {savingHours ? 'Saving...' : 'Save changes'}
+          </button>
+        </div>
+      </section>
+
+      <section className="rounded-3xl border border-white bg-white p-6 shadow-[0_12px_40px_rgba(44,44,44,0.05)]">
+        <p className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-brand-sage">
+          Settings
+        </p>
+        <h2 className="text-xl font-semibold text-brand-text">Days off</h2>
+        <p className="mt-2 text-sm leading-6 text-brand-muted">
+          Block holidays, days off, or one-off unavailable dates.
+        </p>
+
+        <div className="mt-5 rounded-2xl border border-brand-border bg-brand-bg p-4">
+          <div className="grid gap-3">
+            <label className="block">
+              <span className="mb-1.5 block text-xs font-semibold text-brand-text">Date</span>
+              <input
+                type="date"
+                value={newBlockedDate}
+                min={getLocalDateKey(new Date())}
+                onChange={(event) => {
+                  setNewBlockedDate(event.target.value)
+                  setBlockedDatesMessage(null)
+                }}
+                className="w-full rounded-2xl border border-brand-border bg-white px-3 py-2.5 text-sm font-medium text-brand-text outline-none transition focus:border-brand-sage focus:ring-4 focus:ring-brand-sage-light"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1.5 block text-xs font-semibold text-brand-text">
+                Reason <span className="font-medium text-brand-muted">(optional)</span>
+              </span>
+              <input
+                type="text"
+                value={newBlockedReason}
+                onChange={(event) => {
+                  setNewBlockedReason(event.target.value)
+                  setBlockedDatesMessage(null)
+                }}
+                placeholder="Holiday, appointment, closed..."
+                className="w-full rounded-2xl border border-brand-border bg-white px-3 py-2.5 text-sm font-medium text-brand-text outline-none transition placeholder:text-brand-muted/70 focus:border-brand-sage focus:ring-4 focus:ring-brand-sage-light"
+              />
+            </label>
+          </div>
+
+          <div className="mt-4 flex justify-end">
+            <button
+              type="button"
+              onClick={() => void addBlockedDate()}
+              disabled={savingBlockedDate}
+              className="rounded-2xl bg-brand-text px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-black disabled:cursor-not-allowed disabled:bg-stone-200 disabled:text-stone-500"
+            >
+              {savingBlockedDate ? 'Adding...' : 'Add day off'}
+            </button>
+          </div>
+        </div>
+
+        {blockedDatesMessage && (
+          <p
+            className={`mt-4 rounded-2xl px-4 py-3 text-sm font-medium ${
+              blockedDatesMessage.tone === 'success'
+                ? 'bg-brand-sage-light text-brand-sage'
+                : 'bg-rose-50 text-rose-700'
+            }`}
+          >
+            {blockedDatesMessage.text}
+          </p>
+        )}
+
+        <div className="mt-5">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <p className="text-sm font-semibold text-brand-text">Upcoming blocked dates</p>
+            <span className="rounded-full bg-brand-bg px-2.5 py-1 text-xs font-semibold text-brand-muted">
+              {blockedDates.length}
+            </span>
+          </div>
+
+          {loadingBlockedDates ? (
+            <div className="grid gap-2.5">
+              {[1, 2, 3].map((item) => (
+                <div key={item} className="h-16 animate-pulse rounded-2xl bg-brand-bg" />
+              ))}
+            </div>
+          ) : blockedDates.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-brand-border bg-brand-bg px-4 py-5 text-sm text-brand-muted">
+              No upcoming days off.
+            </div>
+          ) : (
+            <div className="grid gap-2.5">
+              {blockedDates.map((blockedDate) => (
+                <div
+                  key={blockedDate.date}
+                  className="grid gap-3 rounded-2xl border border-brand-border bg-brand-bg px-4 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center"
+                >
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-brand-text">
+                      {format(parseISO(blockedDate.date), 'EEE, d MMM yyyy')}
+                    </p>
+                    <p className="mt-0.5 truncate text-xs text-brand-muted">
+                      {blockedDate.reason || 'No reason added'}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void removeBlockedDate(blockedDate.date)}
+                    disabled={removingBlockedDate === blockedDate.date}
+                    className="w-fit rounded-xl bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {removingBlockedDate === blockedDate.date ? 'Removing...' : 'Remove'}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </section>
     </div>
   )
 }
@@ -430,7 +996,99 @@ function TodaySummary({
   )
 }
 
-function WeekView({ bookings }: { bookings: Booking[] }) {
+function TodayEmptyState({ nextBooking }: { nextBooking?: Booking }) {
+  const nextStart = nextBooking ? parseISO(nextBooking.start_time) : null
+  const tomorrow = addDays(getLocalDayStart(), 1)
+  const nextLabel = nextStart
+    ? isSameDay(nextStart, tomorrow)
+      ? `Next booking is tomorrow at ${format(nextStart, 'HH:mm')}.`
+      : `Next booking is ${format(nextStart, 'EEE, d MMM')} at ${format(nextStart, 'HH:mm')}.`
+    : 'No bookings today. Upcoming bookings will appear here once loaded.'
+
+  return (
+    <div className="rounded-3xl border border-dashed border-brand-border bg-white px-6 py-14 text-center">
+      <h2 className="text-xl font-semibold text-brand-text">No bookings today</h2>
+      <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-brand-muted">{nextLabel}</p>
+    </div>
+  )
+}
+
+function ListView({
+  bookings,
+  updatingId,
+  onUpdateStatus,
+}: {
+  bookings: Booking[]
+  updatingId: string | null
+  onUpdateStatus: (id: string, status: Booking['status']) => void
+}) {
+  const groups = useMemo(() => {
+    const todayStart = getLocalDayStart()
+    const tomorrowStart = addDays(todayStart, 1)
+    const weekEnd = addDays(todayStart, 7)
+    const grouped = {
+      today: [] as Booking[],
+      week: [] as Booking[],
+      later: [] as Booking[],
+    }
+
+    bookings.forEach((booking) => {
+      const startTime = parseISO(booking.start_time).getTime()
+
+      if (startTime >= todayStart.getTime() && startTime < tomorrowStart.getTime()) {
+        grouped.today.push(booking)
+      } else if (startTime >= tomorrowStart.getTime() && startTime < weekEnd.getTime()) {
+        grouped.week.push(booking)
+      } else {
+        grouped.later.push(booking)
+      }
+    })
+
+    return [
+      { key: 'today', label: 'Today', bookings: grouped.today },
+      { key: 'week', label: 'This Week', bookings: grouped.week },
+      { key: 'later', label: 'Later', bookings: grouped.later },
+    ]
+  }, [bookings])
+
+  return (
+    <div className="grid gap-5">
+      {groups.map((group) => (
+        <section key={group.key} className={group.bookings.length === 0 ? 'hidden' : ''}>
+          <div className="mb-2 flex items-center gap-3">
+            <h2 className="text-xs font-semibold uppercase tracking-[0.16em] text-brand-sage">
+              {group.label}
+            </h2>
+            <span className="h-px flex-1 bg-brand-border" />
+            <span className="text-xs font-medium text-brand-muted">
+              {group.bookings.length} {group.bookings.length === 1 ? 'booking' : 'bookings'}
+            </span>
+          </div>
+          <div className="grid gap-3">
+            {group.bookings.map((booking) => (
+              <BookingCard
+                key={booking.id}
+                booking={booking}
+                updating={updatingId === booking.id}
+                onUpdateStatus={onUpdateStatus}
+              />
+            ))}
+          </div>
+        </section>
+      ))}
+    </div>
+  )
+}
+
+function WeekView({
+  bookings,
+  updatingId,
+  onUpdateStatus,
+}: {
+  bookings: Booking[]
+  updatingId: string | null
+  onUpdateStatus: (id: string, status: Booking['status']) => void
+}) {
   const days = useMemo(() => {
     const start = getLocalDayStart()
     return Array.from({ length: 7 }, (_, index) => {
@@ -438,7 +1096,7 @@ function WeekView({ bookings }: { bookings: Booking[] }) {
       const key = getLocalDateKey(date)
       const dayBookings = bookings.filter((booking) => getLocalDateKey(parseISO(booking.start_time)) === key)
       const revenue = dayBookings
-        .filter(isActiveBooking)
+        .filter(isValueActiveBooking)
         .reduce((sum, booking) => sum + Number(booking.total_price || 0), 0)
 
       return { date, key, bookings: dayBookings, revenue }
@@ -464,7 +1122,12 @@ function WeekView({ bookings }: { bookings: Booking[] }) {
           ) : (
             <div className="grid gap-2">
               {day.bookings.map((booking) => (
-                <WeekBookingRow key={booking.id} booking={booking} />
+                <WeekBookingRow
+                  key={booking.id}
+                  booking={booking}
+                  updating={updatingId === booking.id}
+                  onUpdateStatus={onUpdateStatus}
+                />
               ))}
             </div>
           )}
@@ -474,12 +1137,26 @@ function WeekView({ bookings }: { bookings: Booking[] }) {
   )
 }
 
-function WeekBookingRow({ booking }: { booking: Booking }) {
+function WeekBookingRow({
+  booking,
+  updating,
+  onUpdateStatus,
+}: {
+  booking: Booking
+  updating: boolean
+  onUpdateStatus: (id: string, status: Booking['status']) => void
+}) {
   const start = parseISO(booking.start_time)
   const end = parseISO(booking.end_time)
+  const needsAction = booking.status === 'pending'
+  const showStatusActions = canUpdateStatus(booking)
 
   return (
-    <div className="grid gap-3 rounded-2xl bg-brand-bg px-4 py-3 sm:grid-cols-[9rem_minmax(0,1fr)_auto] sm:items-center">
+    <div
+      className={`grid gap-3 rounded-2xl px-4 py-3 sm:grid-cols-[9rem_minmax(0,1fr)_auto] sm:items-center ${
+        needsAction ? 'bg-amber-50/70 ring-1 ring-amber-100' : 'bg-brand-bg'
+      }`}
+    >
       <p className="text-sm font-semibold text-brand-text">
         {format(start, 'HH:mm')} - {format(end, 'HH:mm')}
       </p>
@@ -494,6 +1171,34 @@ function WeekBookingRow({ booking }: { booking: Booking }) {
         <span className="text-sm font-semibold text-brand-sage">
           {moneyFormatter.format(Number(booking.total_price || 0))}
         </span>
+        {showStatusActions && (
+          <div className="flex gap-1.5">
+            {booking.status === 'pending' && (
+              <ActionButton disabled={updating} onClick={() => onUpdateStatus(booking.id, 'confirmed')}>
+                Confirm
+              </ActionButton>
+            )}
+            {booking.status === 'confirmed' && (
+              <ActionButton disabled={updating} onClick={() => onUpdateStatus(booking.id, 'completed')}>
+                Complete
+              </ActionButton>
+            )}
+            <ActionButton
+              disabled={updating}
+              variant="neutral"
+              onClick={() => onUpdateStatus(booking.id, 'no_show')}
+            >
+              No-show
+            </ActionButton>
+            <ActionButton
+              disabled={updating}
+              variant="danger"
+              onClick={() => onUpdateStatus(booking.id, 'cancelled')}
+            >
+              Cancel
+            </ActionButton>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -536,7 +1241,7 @@ function MonthView({ bookings }: { bookings: Booking[] }) {
         {days.map((day) => {
           const key = getLocalDateKey(day)
           const dayBookings = bookingsByDay[key] || []
-          const activeBookings = dayBookings.filter(isActiveBooking)
+          const activeBookings = dayBookings.filter(isValueActiveBooking)
           const revenue = activeBookings.reduce((sum, booking) => sum + Number(booking.total_price || 0), 0)
           const inMonth = isSameMonth(day, monthStart)
           const isToday = key === todayKey
@@ -640,12 +1345,41 @@ function GapIndicator({ minutes, overlap = false }: { minutes: number; overlap?:
   )
 }
 
-function StatCard({ label, value, detail }: { label: string; value: string | number; detail: string }) {
+function StatCard({
+  label,
+  value,
+  detail,
+  highlighted = false,
+  badge,
+}: {
+  label: string
+  value: string | number
+  detail: string
+  highlighted?: boolean
+  badge?: string
+}) {
   return (
-    <div className="rounded-3xl border border-white bg-white p-5 shadow-[0_14px_40px_rgba(44,44,44,0.06)]">
-      <p className="text-sm font-medium text-brand-muted">{label}</p>
+    <div
+      className={`rounded-3xl border p-5 shadow-[0_14px_40px_rgba(44,44,44,0.06)] ${
+        highlighted ? 'border-amber-200 bg-amber-50/70' : 'border-white bg-white'
+      }`}
+    >
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-sm font-medium text-brand-muted">{label}</p>
+        {badge && (
+          <span className="rounded-full bg-white px-2.5 py-1 text-[0.68rem] font-semibold text-amber-700 ring-1 ring-amber-200">
+            {badge}
+          </span>
+        )}
+      </div>
       <p className="mt-3 text-3xl font-semibold tracking-tight text-brand-text">{value}</p>
-      <p className="mt-2 text-xs font-medium uppercase tracking-[0.16em] text-brand-sage">{detail}</p>
+      <p
+        className={`mt-2 text-xs font-medium uppercase tracking-[0.16em] ${
+          highlighted ? 'text-amber-700' : 'text-brand-sage'
+        }`}
+      >
+        {detail}
+      </p>
     </div>
   )
 }
@@ -668,6 +1402,8 @@ function BookingCard({
   const end = parseISO(booking.end_time)
   const duration = getDurationMinutes(booking)
   const primaryService = booking.booking_services?.find((service) => service.is_primary)
+  const needsAction = booking.status === 'pending'
+  const showStatusActions = canUpdateStatus(booking)
 
   return (
     <article
@@ -684,6 +1420,11 @@ function BookingCard({
               <span className={`rounded-full px-3 py-1 text-xs font-semibold ring-1 ${statusStyles[booking.status]}`}>
                 {statusLabels[booking.status]}
               </span>
+              {needsAction && (
+                <span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700 ring-1 ring-amber-200">
+                  Needs action
+                </span>
+              )}
             </div>
             <p className="mt-3 text-base font-semibold text-brand-text">{getPrimaryService(booking)}</p>
             {addons.length > 0 && (
@@ -710,6 +1451,11 @@ function BookingCard({
               <span className={`rounded-full px-3 py-1 text-xs font-semibold ring-1 ${statusStyles[booking.status]}`}>
                 {statusLabels[booking.status]}
               </span>
+              {needsAction && (
+                <span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700 ring-1 ring-amber-200">
+                  Needs action
+                </span>
+              )}
             </div>
             <a className="mt-1 block text-sm text-brand-muted hover:text-brand-text" href={`tel:${booking.client_phone}`}>
               {booking.client_phone}
@@ -760,24 +1506,18 @@ function BookingCard({
             )}
           </div>
 
-          <div className="mt-3 flex flex-wrap justify-end gap-2">
-            <a
-              href={`tel:${booking.client_phone}`}
-              className="rounded-xl bg-white px-3 py-2 text-xs font-semibold text-brand-text ring-1 ring-brand-border transition hover:ring-brand-sage"
-            >
-              Call
-            </a>
-            {booking.status === 'pending' && (
-              <ActionButton disabled={updating} onClick={() => onUpdateStatus(booking.id, 'confirmed')}>
-                Confirm
-              </ActionButton>
-            )}
-            {booking.status === 'confirmed' && (
-              <ActionButton disabled={updating} onClick={() => onUpdateStatus(booking.id, 'completed')}>
-                Complete
-              </ActionButton>
-            )}
-            {booking.status === 'confirmed' && (
+          {showStatusActions && (
+            <div className="mt-3 flex flex-wrap justify-end gap-2">
+              {booking.status === 'pending' && (
+                <ActionButton disabled={updating} onClick={() => onUpdateStatus(booking.id, 'confirmed')}>
+                  Confirm
+                </ActionButton>
+              )}
+              {booking.status === 'confirmed' && (
+                <ActionButton disabled={updating} onClick={() => onUpdateStatus(booking.id, 'completed')}>
+                  Complete
+                </ActionButton>
+              )}
               <ActionButton
                 disabled={updating}
                 variant="neutral"
@@ -785,13 +1525,11 @@ function BookingCard({
               >
                 No-show
               </ActionButton>
-            )}
-            {isActiveBooking(booking) && (
               <ActionButton disabled={updating} variant="danger" onClick={() => onUpdateStatus(booking.id, 'cancelled')}>
                 Cancel
               </ActionButton>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       </div>
     </article>

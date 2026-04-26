@@ -1,13 +1,13 @@
 export default function SuccessView() {
   return (
-    <div className="min-h-screen flex items-center justify-center p-6 bg-brand-bg">
-      <div className="bg-white rounded-3xl p-10 max-w-md w-full text-center shadow-sm">
+    <div className="flex min-h-screen items-center justify-center bg-[#f7f8f4] p-6">
+      <div className="w-full max-w-md rounded-[2rem] border border-white bg-white p-10 text-center shadow-[0_24px_80px_rgba(44,44,44,0.10)]">
         <img
           src="/laylalogo.jpg"
           alt="Beauty by Layla"
-          className="w-24 mx-auto mb-6 opacity-80"
+          className="mx-auto mb-6 w-24 opacity-90"
         />
-        <h2 className="text-xl font-light text-gray-800 mb-3">Request received</h2>
+        <h2 className="mb-3 text-2xl font-semibold text-brand-text">Request received</h2>
         <p className="text-sm leading-relaxed text-brand-muted">
           Thank you for booking with Beauty by Layla. You'll receive a text once your appointment is
           confirmed.

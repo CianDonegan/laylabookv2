@@ -41,83 +41,104 @@ export default function DatePicker({ selectedDate, onSelect, isDateBlocked, minD
   }
 
   return (
-    <div className="bg-white rounded-3xl shadow-sm overflow-hidden mb-4">
-      <div className="px-6 pt-5 pb-4 flex items-center justify-between border-b border-brand-border">
-        <div className="flex items-center gap-3">
-          <span className="w-6 h-6 rounded-full text-white text-xs flex items-center justify-center font-medium bg-brand-sage">
+    <div className="mb-4 overflow-hidden rounded-[1.5rem] border border-brand-border/70 bg-white shadow-[0_10px_30px_rgba(44,44,44,0.04)]">
+      <div className="flex items-start justify-between gap-4 border-b border-[#edf0ea] px-5 py-4 sm:px-6">
+        <div className="flex items-start gap-3">
+          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#8fa17f] text-xs font-semibold text-white">
             2
           </span>
-          <h2 className="font-medium text-sm text-brand-text">Choose a date</h2>
+          <div>
+            <p className="mb-1 text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-[#8fa17f]">
+              Date
+            </p>
+            <h2 className="text-sm font-semibold text-brand-text">Choose a date</h2>
+          </div>
         </div>
         {selectedDate && (
-          <button onClick={() => onSelect('')} className="text-xs text-brand-muted">
+          <button
+            onClick={() => onSelect('')}
+            className="rounded-full border border-[#dfe6da] px-3 py-1 text-xs font-semibold text-[#7f9670] transition-colors hover:bg-[#f4f7f1]"
+          >
             Change
           </button>
         )}
       </div>
 
       {selectedDate && (
-        <div className="px-6 py-3 text-sm font-medium text-brand-sage">
-          {format(parseISO(selectedDate), 'EEEE, d MMMM')}
+        <div className="bg-[#fbfcfa] px-5 py-4 sm:px-6">
+          <div className="rounded-2xl border border-[#cfdcc8] bg-[#f1f6ee] px-4 py-3 shadow-[inset_0_0_0_1px_rgba(143,161,127,0.08)]">
+            <span className="mb-2 inline-flex rounded-full bg-white px-2.5 py-1 text-[0.68rem] font-semibold text-[#7f9670]">
+              Selected
+            </span>
+            <p className="text-sm font-semibold text-brand-text">
+              {format(parseISO(selectedDate), 'EEEE, d MMMM')}
+            </p>
+          </div>
         </div>
       )}
 
       {!selectedDate && (
-        <div className="p-6">
-          <div className="flex items-center justify-between mb-4">
+        <div className="bg-[#fbfcfa] px-5 py-4 sm:px-6">
+          <div className="mb-4 flex items-center justify-between rounded-2xl border border-[#edf0ea] bg-white px-3 py-2">
             <button
               onClick={prevMonth}
               aria-label="Previous month"
-              className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-gray-50 text-gray-400 text-lg"
+              className="flex h-9 w-9 items-center justify-center rounded-full border border-[#edf0ea] bg-[#fbfcfa] text-sm font-semibold text-[#7f9670] transition-colors hover:bg-[#eef3ea]"
             >
               {'<'}
             </button>
-            <span className="text-sm font-medium text-brand-text">
+            <span className="text-sm font-semibold text-brand-text">
               {format(currentMonth, 'MMMM yyyy')}
             </span>
             <button
               onClick={nextMonth}
               aria-label="Next month"
-              className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-gray-50 text-gray-400 text-lg"
+              className="flex h-9 w-9 items-center justify-center rounded-full border border-[#edf0ea] bg-[#fbfcfa] text-sm font-semibold text-[#7f9670] transition-colors hover:bg-[#eef3ea]"
             >
               {'>'}
             </button>
           </div>
 
-          <div className="grid grid-cols-7 mb-2">
-            {DAYS.map((d) => (
-              <div key={d} className="text-center text-xs font-medium py-1 text-brand-muted">
-                {d}
-              </div>
-            ))}
-          </div>
-
-          <div className="grid grid-cols-7 gap-1">
-            {days.map((day, i) => {
-              const dateStr = format(day, 'yyyy-MM-dd')
-              const blocked = isDateBlocked(dateStr)
-              const past = dateStr < minDate
-              const disabled = blocked || past || !isSameMonth(day, currentMonth)
-              const selected = dateStr === selectedDate
-
-              return (
-                <button
-                  key={i}
-                  disabled={disabled}
-                  onClick={() => handleSelect(day)}
-                  className="aspect-square rounded-xl text-xs flex items-center justify-center transition-all"
-                  style={{
-                    background: selected ? '#a8b89a' : 'transparent',
-                    color: disabled ? '#ebebeb' : selected ? '#fff' : '#2c2c2c',
-                    cursor: disabled ? 'not-allowed' : 'pointer',
-                    fontWeight: selected ? '600' : '400',
-                    opacity: isSameMonth(day, currentMonth) ? 1 : 0.3,
-                  }}
+          <div className="rounded-2xl border border-[#edf0ea] bg-white p-3 sm:p-4">
+            <div className="mb-2 grid grid-cols-7">
+              {DAYS.map((d) => (
+                <div
+                  key={d}
+                  className="py-1 text-center text-[0.68rem] font-semibold uppercase tracking-[0.08em] text-brand-muted"
                 >
-                  {format(day, 'd')}
-                </button>
-              )
-            })}
+                  {d}
+                </div>
+              ))}
+            </div>
+
+            <div className="grid grid-cols-7 gap-1.5">
+              {days.map((day, i) => {
+                const dateStr = format(day, 'yyyy-MM-dd')
+                const blocked = isDateBlocked(dateStr)
+                const past = dateStr < minDate
+                const sameMonth = isSameMonth(day, currentMonth)
+                const disabled = blocked || past || !sameMonth
+                const selected = dateStr === selectedDate
+                const dayClass = selected
+                  ? 'border-[#8fa17f] bg-[#8fa17f] font-semibold text-white shadow-[0_8px_18px_rgba(143,161,127,0.25)]'
+                  : disabled
+                    ? sameMonth
+                      ? 'border-transparent bg-[#f5f6f3] text-[#aeb4aa]'
+                      : 'border-transparent bg-transparent text-[#d2d6ce]'
+                    : 'border-[#edf0ea] bg-white font-medium text-brand-text hover:border-[#cfdcc8] hover:bg-[#f1f6ee] hover:text-[#6f875f]'
+
+                return (
+                  <button
+                    key={i}
+                    disabled={disabled}
+                    onClick={() => handleSelect(day)}
+                    className={`flex aspect-square min-h-10 items-center justify-center rounded-2xl border text-xs transition-all disabled:cursor-not-allowed sm:min-h-11 ${dayClass}`}
+                  >
+                    {format(day, 'd')}
+                  </button>
+                )
+              })}
+            </div>
           </div>
         </div>
       )}
