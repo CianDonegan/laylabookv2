@@ -124,11 +124,6 @@ function formatDuration(minutes: number) {
   return remainder ? `${hours}h ${remainder}m` : `${hours}h`
 }
 
-function formatServicePrice(price: number | null | undefined) {
-  if (price === null || price === undefined) return ''
-  return moneyFormatter.format(Number(price))
-}
-
 function getLocalDateKey(date: Date) {
   return format(date, 'yyyy-MM-dd')
 }
@@ -1736,19 +1731,23 @@ function ListView({
   }, [bookings])
 
   return (
-    <div className="grid gap-5">
+    <div className="grid gap-4">
       {groups.map((group) => (
-        <section key={group.key} className={group.bookings.length === 0 ? 'hidden' : ''}>
-          <div className="mb-2 flex items-center gap-3">
-            <h2 className="text-xs font-semibold uppercase tracking-[0.16em] text-brand-sage">
+        <section
+          key={group.key}
+          className={`rounded-3xl border border-white bg-white/80 p-4 shadow-[0_12px_40px_rgba(44,44,44,0.05)] ${
+            group.bookings.length === 0 ? 'hidden' : ''
+          }`}
+        >
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-brand-border pb-3">
+            <h2 className="rounded-full bg-brand-bg px-3 py-1.5 text-sm font-semibold text-brand-text">
               {group.label}
             </h2>
-            <span className="h-px flex-1 bg-brand-border" />
-            <span className="text-xs font-medium text-brand-muted">
+            <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-brand-muted ring-1 ring-brand-border">
               {group.bookings.length} {group.bookings.length === 1 ? 'booking' : 'bookings'}
             </span>
           </div>
-          <div className="grid gap-3">
+          <div className="grid gap-2">
             {group.bookings.map((booking) => (
               <BookingCard
                 key={booking.id}
@@ -2156,127 +2155,72 @@ function BookingCard({
   updating,
   onUpdateStatus,
   onReschedule,
-  minHeight,
-  scheduleMode = false,
 }: {
   booking: Booking
   updating: boolean
   onUpdateStatus: (id: string, status: Booking['status']) => void
   onReschedule: (booking: Booking) => void
-  minHeight?: number
-  scheduleMode?: boolean
 }) {
   const addons = getAddons(booking)
   const start = parseISO(booking.start_time)
   const end = parseISO(booking.end_time)
   const duration = getDurationMinutes(booking)
-  const primaryService = booking.booking_services?.find((service) => service.is_primary)
   const needsAction = booking.status === 'pending'
   const showStatusActions = canUpdateStatus(booking)
+  const serviceSummary = [getPrimaryService(booking), ...addons.map((addon) => addon.name_at_booking)].join(' + ')
+  const isCancelled = booking.status === 'cancelled'
+  const rowTone = {
+    pending: 'border-l-4 border-amber-300 bg-amber-50/70',
+    confirmed: 'border-l-4 border-l-brand-sage bg-[#fbfcfa]',
+    completed: 'border-l-4 border-blue-200 bg-[#fbfcfa]',
+    cancelled: 'border-l-4 border-stone-200 bg-stone-50/70 opacity-70',
+    no_show: 'border-l-4 border-rose-200 bg-rose-50/50 opacity-80',
+  }[booking.status]
 
   return (
     <article
-      className="rounded-3xl border border-white bg-white p-5 shadow-[0_12px_40px_rgba(44,44,44,0.05)] transition hover:-translate-y-0.5 hover:shadow-[0_20px_60px_rgba(44,44,44,0.08)]"
-      style={minHeight ? { minHeight } : undefined}
+      className={`rounded-2xl border border-transparent px-4 py-3 shadow-[0_10px_30px_rgba(44,44,44,0.04)] transition hover:-translate-y-0.5 hover:shadow-[0_16px_45px_rgba(44,44,44,0.08)] ${rowTone}`}
     >
-      <div className="grid h-full gap-5 lg:grid-cols-[1.1fr_1fr_auto] lg:items-center">
-        {scheduleMode ? (
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-3">
-              <h2 className="text-2xl font-semibold tracking-tight text-brand-text">
-                {format(start, 'HH:mm')} - {format(end, 'HH:mm')}
-              </h2>
-              <span className={`rounded-full px-3 py-1 text-xs font-semibold ring-1 ${statusStyles[booking.status]}`}>
-                {statusLabels[booking.status]}
-              </span>
-              {needsAction && (
-                <span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700 ring-1 ring-amber-200">
-                  Needs action
-                </span>
-              )}
-            </div>
-            <p className="mt-3 text-base font-semibold text-brand-text">{getPrimaryService(booking)}</p>
-            {addons.length > 0 && (
-              <div className="mt-1 grid gap-1">
-                {addons.map((addon) => (
-                  <p key={`${booking.id}-${addon.name_at_booking}-summary`} className="text-sm text-brand-muted">
-                    + {addon.name_at_booking}
-                  </p>
-                ))}
-              </div>
-            )}
-            <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1">
-              <p className="text-sm font-medium text-brand-text">{booking.client_name}</p>
-              <a className="text-sm text-brand-muted hover:text-brand-text" href={`tel:${booking.client_phone}`}>
-                {booking.client_phone}
-              </a>
-            </div>
-            {booking.notes && <p className="mt-3 text-sm leading-6 text-brand-muted">{booking.notes}</p>}
+      <div className="grid gap-3 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)_auto] xl:items-center">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            {needsAction && <span className="h-2.5 w-2.5 rounded-full bg-amber-400" />}
+            <h2 className={`truncate text-base font-semibold ${isCancelled ? 'text-stone-500' : 'text-brand-text'}`}>
+              {booking.client_name}
+            </h2>
+            <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ${statusStyles[booking.status]}`}>
+              {statusLabels[booking.status]}
+            </span>
           </div>
-        ) : (
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-3">
-              <h2 className="truncate text-lg font-semibold text-brand-text">{booking.client_name}</h2>
-              <span className={`rounded-full px-3 py-1 text-xs font-semibold ring-1 ${statusStyles[booking.status]}`}>
-                {statusLabels[booking.status]}
-              </span>
-              {needsAction && (
-                <span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700 ring-1 ring-amber-200">
-                  Needs action
-                </span>
-              )}
-            </div>
-            <a className="mt-1 block text-sm text-brand-muted hover:text-brand-text" href={`tel:${booking.client_phone}`}>
+          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-brand-muted">
+            <a className="hover:text-brand-text" href={`tel:${booking.client_phone}`}>
               {booking.client_phone}
             </a>
-            {booking.notes && <p className="mt-3 text-sm leading-6 text-brand-muted">{booking.notes}</p>}
+            <span>{format(start, 'EEE, d MMM')}</span>
+            <span>
+              {format(start, 'HH:mm')} - {format(end, 'HH:mm')}
+            </span>
           </div>
-        )}
-
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
-          <Detail label="Date" value={format(start, 'EEE, d MMM')} />
-          <Detail label="Starts" value={format(start, 'HH:mm')} />
-          <Detail label="Ends" value={format(end, 'HH:mm')} />
-          <Detail label="Duration" value={formatDuration(duration)} />
-          <Detail label="Total" value={moneyFormatter.format(Number(booking.total_price || 0))} />
         </div>
 
-        <div className="lg:min-w-72">
-          <div className="rounded-2xl bg-brand-bg p-4">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                {!scheduleMode && (
-                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-brand-muted">Primary service</p>
-                )}
-                <p className="mt-1 text-sm font-semibold text-brand-text">{getPrimaryService(booking)}</p>
-              </div>
-              {primaryService && formatServicePrice(primaryService.price_at_booking) && (
-                <span className="text-sm font-semibold text-brand-sage">
-                  {formatServicePrice(primaryService.price_at_booking)}
-                </span>
-              )}
-            </div>
-            {addons.length > 0 ? (
-              <div className="mt-3 border-t border-brand-border pt-3">
-                <p className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-brand-muted">Add-ons</p>
-                <div className="grid gap-1.5">
-                  {addons.map((addon) => (
-                    <div key={`${booking.id}-${addon.name_at_booking}`} className="flex justify-between gap-3 text-xs">
-                      <span className="leading-5 text-brand-text">{addon.name_at_booking}</span>
-                      {formatServicePrice(addon.price_at_booking) && (
-                        <span className="font-semibold text-brand-sage">{formatServicePrice(addon.price_at_booking)}</span>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ) : (
-              <p className="mt-3 border-t border-brand-border pt-3 text-xs text-brand-muted">No add-ons selected</p>
-            )}
+        <div className="min-w-0">
+          <p className={`truncate text-sm font-semibold ${isCancelled ? 'text-stone-500' : 'text-brand-text'}`}>
+            {serviceSummary}
+          </p>
+          <div className="mt-1 flex flex-wrap items-center gap-2">
+            <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-brand-muted ring-1 ring-brand-border">
+              {formatDuration(duration)}
+            </span>
+            <span className="rounded-full bg-brand-text px-2.5 py-1 text-xs font-semibold text-white shadow-sm">
+              {moneyFormatter.format(Number(booking.total_price || 0))}
+            </span>
           </div>
+          {booking.notes && <p className="mt-2 line-clamp-1 text-xs text-brand-muted">{booking.notes}</p>}
+        </div>
 
+        <div className="xl:min-w-72">
           {showStatusActions && (
-            <div className="mt-3 flex flex-wrap justify-end gap-2">
+            <div className="flex flex-wrap gap-1.5 xl:justify-end">
               {canReschedule(booking) && (
                 <ActionButton disabled={updating} variant="neutral" onClick={() => onReschedule(booking)}>
                   Reschedule
