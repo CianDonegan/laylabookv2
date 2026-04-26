@@ -3,6 +3,7 @@ import type { Session } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
 import {
   addDays,
+  addMinutes,
   addMonths,
   differenceInMinutes,
   eachDayOfInterval,
@@ -15,6 +16,11 @@ import {
   startOfMonth,
   startOfWeek,
 } from 'date-fns'
+import DatePicker from '../components/booking/DatePicker'
+import TimeGrid from '../components/booking/TimeGrid'
+import { useBlockedDates } from '../hooks/useBlockedDates'
+import { useWorkingHours } from '../hooks/useWorkingHours'
+import { getLocalToday } from '../utils/time'
 import type { BlockedDate, Booking, WorkingHours } from '../types'
 
 type AdminView = 'today' | 'week' | 'month' | 'list' | 'settings'
@@ -80,6 +86,10 @@ function canUpdateStatus(booking: Booking) {
   return booking.status === 'pending' || booking.status === 'confirmed'
 }
 
+function canReschedule(booking: Booking) {
+  return booking.status === 'pending' || booking.status === 'confirmed'
+}
+
 function getBookingValue(bookings: Booking[]) {
   return bookings
     .filter(isValueActiveBooking)
@@ -116,6 +126,10 @@ function getLocalDayStart(date = new Date()) {
   const start = new Date(date)
   start.setHours(0, 0, 0, 0)
   return start
+}
+
+function buildLocalDateTime(date: string, time: string) {
+  return `${date}T${time}:00`
 }
 
 function mergeBookings(existing: Booking[], incoming: Booking[]) {
@@ -167,12 +181,22 @@ export default function AdminPage() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
   const [search, setSearch] = useState('')
   const [errorMessage, setErrorMessage] = useState('')
+  const [successMessage, setSuccessMessage] = useState('')
   const [updatingId, setUpdatingId] = useState<string | null>(null)
+  const [reschedulingBooking, setReschedulingBooking] = useState<Booking | null>(null)
   const viewRef = useRef(view)
 
   useEffect(() => {
     viewRef.current = view
   }, [view])
+
+  useEffect(() => {
+    if (!successMessage) return
+
+    const timeoutId = window.setTimeout(() => setSuccessMessage(''), 4000)
+
+    return () => window.clearTimeout(timeoutId)
+  }, [successMessage])
 
   const fetchBookings = useCallback(async (nextView?: AdminView) => {
     const targetView = nextView ?? viewRef.current
@@ -284,6 +308,7 @@ export default function AdminPage() {
   const updateStatus = async (id: string, status: Booking['status']) => {
     setUpdatingId(id)
     setErrorMessage('')
+    setSuccessMessage('')
 
     const { data, error } = await supabase
       .from('bookings')
@@ -305,6 +330,12 @@ export default function AdminPage() {
 
     await fetchBookings()
     setUpdatingId(null)
+  }
+
+  const handleRescheduled = async () => {
+    setReschedulingBooking(null)
+    setSuccessMessage('Booking rescheduled.')
+    await fetchBookings()
   }
 
   const visibleBookings = useMemo(() => {
@@ -479,6 +510,12 @@ export default function AdminPage() {
       </header>
 
       <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+        {successMessage && (
+          <div className="mb-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+            {successMessage}
+          </div>
+        )}
+
         {errorMessage && (
           <div className="mb-5 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
             {errorMessage}
@@ -587,6 +624,7 @@ export default function AdminPage() {
               bookings={visibleBookings}
               updatingId={updatingId}
               onUpdateStatus={updateStatus}
+              onReschedule={setReschedulingBooking}
             />
           ) : view === 'month' ? (
             <MonthView bookings={visibleBookings} />
@@ -607,18 +645,292 @@ export default function AdminPage() {
                   bookings={visibleBookings}
                   updatingId={updatingId}
                   onUpdateStatus={updateStatus}
+                  onReschedule={setReschedulingBooking}
                 />
               ) : (
                 <ListView
                   bookings={visibleBookings}
                   updatingId={updatingId}
                   onUpdateStatus={updateStatus}
+                  onReschedule={setReschedulingBooking}
                 />
               )}
             </>
           )}
         </section>
       </main>
+      {reschedulingBooking && (
+        <RescheduleModal
+          key={reschedulingBooking.id}
+          booking={reschedulingBooking}
+          onClose={() => setReschedulingBooking(null)}
+          onRescheduled={handleRescheduled}
+        />
+      )}
+    </div>
+  )
+}
+
+function useRescheduleAvailability(date: string, durationMinutes: number, bookingId: string): {
+  slots: string[]
+  loading: boolean
+  error: string | null
+} {
+  const [slots, setSlots] = useState<string[]>([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const hasRequiredInput = Boolean(date && durationMinutes && bookingId)
+
+  useEffect(() => {
+    if (!hasRequiredInput) return
+
+    let cancelled = false
+
+    async function fetchSlots() {
+      setLoading(true)
+      setError(null)
+
+      try {
+        const { data, error } = await supabase.rpc('get_reschedule_available_slots', {
+          p_booking_id: bookingId,
+          p_date: date,
+          p_duration_minutes: durationMinutes,
+        })
+
+        if (error) throw error
+        if (cancelled) return
+
+        setSlots((data || []).map((row: { slot_time: string }) => row.slot_time.slice(0, 5)))
+      } catch (err) {
+        if (cancelled) return
+
+        setSlots([])
+        setError(err instanceof Error ? err.message : 'Failed to load times')
+      } finally {
+        if (!cancelled) {
+          setLoading(false)
+        }
+      }
+    }
+
+    void fetchSlots()
+
+    return () => {
+      cancelled = true
+    }
+  }, [bookingId, date, durationMinutes, hasRequiredInput])
+
+  return {
+    slots: hasRequiredInput ? slots : [],
+    loading: hasRequiredInput ? loading : false,
+    error,
+  }
+}
+
+function RescheduleModal({
+  booking,
+  onClose,
+  onRescheduled,
+}: {
+  booking: Booking
+  onClose: () => void
+  onRescheduled: () => Promise<void>
+}) {
+  const [selectedDate, setSelectedDate] = useState('')
+  const [selectedTime, setSelectedTime] = useState('')
+  const [confirming, setConfirming] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [errorMessage, setErrorMessage] = useState('')
+  const { hours: workingHours, loading: loadingWorkingHours } = useWorkingHours()
+  const { dates: blockedDates, loading: loadingBlockedDates } = useBlockedDates()
+  const durationMinutes = getDurationMinutes(booking)
+  const {
+    slots,
+    loading: loadingSlots,
+    error: slotsError,
+  } = useRescheduleAvailability(selectedDate, durationMinutes, booking.id)
+  const oldStart = parseISO(booking.start_time)
+  const oldEnd = parseISO(booking.end_time)
+  const newStart = selectedDate && selectedTime ? parseISO(buildLocalDateTime(selectedDate, selectedTime)) : null
+  const newEnd = newStart ? addMinutes(newStart, durationMinutes) : null
+  const setupLoading = loadingWorkingHours || loadingBlockedDates
+
+  const isDateBlocked = (dateStr: string) => {
+    if (blockedDates.includes(dateStr)) return true
+
+    const day = new Date(dateStr).getDay()
+    const hours = workingHours.find((row) => row.day_of_week === day)
+
+    return !hours?.is_open
+  }
+
+  const handleSelectDate = (date: string) => {
+    setSelectedDate(date)
+    setSelectedTime('')
+    setConfirming(false)
+    setErrorMessage('')
+  }
+
+  const handleSelectTime = (time: string) => {
+    setSelectedTime(time)
+    setConfirming(false)
+    setErrorMessage('')
+  }
+
+  const handleConfirm = async () => {
+    if (!selectedDate || !selectedTime) return
+
+    setSaving(true)
+    setErrorMessage('')
+
+    const { error } = await supabase.rpc('reschedule_booking', {
+      p_booking_id: booking.id,
+      p_start_time: buildLocalDateTime(selectedDate, selectedTime),
+    })
+
+    if (error) {
+      setErrorMessage(error.message || 'Could not reschedule this booking. Please try again.')
+      setSaving(false)
+      setConfirming(false)
+      return
+    }
+
+    await onRescheduled()
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-stone-950/45 px-4 py-6 backdrop-blur-sm">
+      <div className="mx-auto max-w-3xl rounded-3xl border border-white bg-[#f7f8f4] p-4 shadow-[0_24px_90px_rgba(0,0,0,0.22)] sm:p-6">
+        <div className="mb-5 flex flex-col gap-4 border-b border-brand-border pb-4 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-brand-sage">
+              Reschedule
+            </p>
+            <h2 className="text-2xl font-semibold text-brand-text">{booking.client_name}</h2>
+            <p className="mt-2 text-sm text-brand-muted">
+              {getPrimaryService(booking)} - {formatDuration(durationMinutes)}
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            disabled={saving}
+            className="self-start rounded-2xl border border-brand-border bg-white px-4 py-2 text-sm font-semibold text-brand-text transition hover:border-brand-sage disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Close
+          </button>
+        </div>
+
+        <div className="mb-5 grid gap-3 sm:grid-cols-2">
+          <RescheduleSummary label="Current time" start={oldStart} end={oldEnd} />
+          {newStart && newEnd ? (
+            <RescheduleSummary label="New time" start={newStart} end={newEnd} highlighted />
+          ) : (
+            <div className="rounded-2xl border border-dashed border-brand-border bg-white px-4 py-3">
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-brand-muted">New time</p>
+              <p className="mt-1 text-sm font-semibold text-brand-text">Choose a date and time</p>
+            </div>
+          )}
+        </div>
+
+        {errorMessage && (
+          <div className="mb-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+            {errorMessage}
+          </div>
+        )}
+
+        {setupLoading ? (
+          <div className="rounded-2xl border border-white bg-white px-4 py-5 text-sm font-medium text-brand-muted">
+            Loading schedule rules...
+          </div>
+        ) : (
+          <>
+            {!confirming && (
+              <>
+                <DatePicker
+                  selectedDate={selectedDate}
+                  onSelect={handleSelectDate}
+                  isDateBlocked={isDateBlocked}
+                  minDate={getLocalToday()}
+                />
+
+                {selectedDate && (
+                  <TimeGrid
+                    slots={slots}
+                    selectedTime={selectedTime}
+                    onSelect={handleSelectTime}
+                    loading={loadingSlots}
+                    error={slotsError}
+                  />
+                )}
+              </>
+            )}
+
+            {selectedDate && selectedTime && !confirming && (
+              <div className="flex flex-wrap justify-end gap-2">
+                <button
+                  onClick={() => setConfirming(true)}
+                  className="rounded-2xl bg-brand-text px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-black"
+                >
+                  Review Reschedule
+                </button>
+              </div>
+            )}
+
+            {confirming && newStart && newEnd && (
+              <div className="rounded-3xl border border-white bg-white p-5 shadow-[0_12px_40px_rgba(44,44,44,0.05)]">
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-brand-sage">
+                  Confirm change
+                </p>
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  <RescheduleSummary label="From" start={oldStart} end={oldEnd} />
+                  <RescheduleSummary label="To" start={newStart} end={newEnd} highlighted />
+                </div>
+                <div className="mt-5 flex flex-wrap justify-end gap-2">
+                  <button
+                    onClick={() => setConfirming(false)}
+                    disabled={saving}
+                    className="rounded-2xl border border-brand-border bg-white px-4 py-2.5 text-sm font-semibold text-brand-text transition hover:border-brand-sage disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    Back
+                  </button>
+                  <button
+                    onClick={() => void handleConfirm()}
+                    disabled={saving}
+                    className="rounded-2xl bg-brand-text px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-black disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {saving ? 'Rescheduling...' : 'Confirm Reschedule'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function RescheduleSummary({
+  label,
+  start,
+  end,
+  highlighted = false,
+}: {
+  label: string
+  start: Date
+  end: Date
+  highlighted?: boolean
+}) {
+  return (
+    <div
+      className={`rounded-2xl border px-4 py-3 ${
+        highlighted ? 'border-[#cfdcc8] bg-[#f1f6ee]' : 'border-brand-border bg-white'
+      }`}
+    >
+      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-brand-muted">{label}</p>
+      <p className="mt-1 text-sm font-semibold text-brand-text">
+        {format(start, 'EEE, d MMM')} - {format(start, 'HH:mm')} - {format(end, 'HH:mm')}
+      </p>
     </div>
   )
 }
@@ -1113,10 +1425,12 @@ function ListView({
   bookings,
   updatingId,
   onUpdateStatus,
+  onReschedule,
 }: {
   bookings: Booking[]
   updatingId: string | null
   onUpdateStatus: (id: string, status: Booking['status']) => void
+  onReschedule: (booking: Booking) => void
 }) {
   const groups = useMemo(() => {
     const todayStart = getLocalDayStart()
@@ -1167,6 +1481,7 @@ function ListView({
                 booking={booking}
                 updating={updatingId === booking.id}
                 onUpdateStatus={onUpdateStatus}
+                onReschedule={onReschedule}
               />
             ))}
           </div>
@@ -1180,10 +1495,12 @@ function WeekView({
   bookings,
   updatingId,
   onUpdateStatus,
+  onReschedule,
 }: {
   bookings: Booking[]
   updatingId: string | null
   onUpdateStatus: (id: string, status: Booking['status']) => void
+  onReschedule: (booking: Booking) => void
 }) {
   const days = useMemo(() => {
     const start = getLocalDayStart()
@@ -1223,6 +1540,7 @@ function WeekView({
                   booking={booking}
                   updating={updatingId === booking.id}
                   onUpdateStatus={onUpdateStatus}
+                  onReschedule={onReschedule}
                 />
               ))}
             </div>
@@ -1237,10 +1555,12 @@ function WeekBookingRow({
   booking,
   updating,
   onUpdateStatus,
+  onReschedule,
 }: {
   booking: Booking
   updating: boolean
   onUpdateStatus: (id: string, status: Booking['status']) => void
+  onReschedule: (booking: Booking) => void
 }) {
   const start = parseISO(booking.start_time)
   const end = parseISO(booking.end_time)
@@ -1268,7 +1588,12 @@ function WeekBookingRow({
           {moneyFormatter.format(Number(booking.total_price || 0))}
         </span>
         {showStatusActions && (
-          <div className="flex gap-1.5">
+          <div className="flex flex-wrap gap-1.5">
+            {canReschedule(booking) && (
+              <ActionButton disabled={updating} variant="neutral" onClick={() => onReschedule(booking)}>
+                Reschedule
+              </ActionButton>
+            )}
             {booking.status === 'pending' && (
               <ActionButton disabled={updating} onClick={() => onUpdateStatus(booking.id, 'confirmed')}>
                 Confirm
@@ -1390,10 +1715,12 @@ function TodaySchedule({
   bookings,
   updatingId,
   onUpdateStatus,
+  onReschedule,
 }: {
   bookings: Booking[]
   updatingId: string | null
   onUpdateStatus: (id: string, status: Booking['status']) => void
+  onReschedule: (booking: Booking) => void
 }) {
   return (
     <div className="grid gap-3">
@@ -1414,6 +1741,7 @@ function TodaySchedule({
                 booking={booking}
                 updating={updatingId === booking.id}
                 onUpdateStatus={onUpdateStatus}
+                onReschedule={onReschedule}
                 minHeight={getScheduleBlockHeight(booking)}
                 scheduleMode
               />
@@ -1484,12 +1812,14 @@ function BookingCard({
   booking,
   updating,
   onUpdateStatus,
+  onReschedule,
   minHeight,
   scheduleMode = false,
 }: {
   booking: Booking
   updating: boolean
   onUpdateStatus: (id: string, status: Booking['status']) => void
+  onReschedule: (booking: Booking) => void
   minHeight?: number
   scheduleMode?: boolean
 }) {
@@ -1604,6 +1934,11 @@ function BookingCard({
 
           {showStatusActions && (
             <div className="mt-3 flex flex-wrap justify-end gap-2">
+              {canReschedule(booking) && (
+                <ActionButton disabled={updating} variant="neutral" onClick={() => onReschedule(booking)}>
+                  Reschedule
+                </ActionButton>
+              )}
               {booking.status === 'pending' && (
                 <ActionButton disabled={updating} onClick={() => onUpdateStatus(booking.id, 'confirmed')}>
                   Confirm
