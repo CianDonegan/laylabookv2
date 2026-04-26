@@ -90,10 +90,6 @@ function getAddons(booking: Booking) {
   return booking.booking_services?.filter((service) => !service.is_primary) || []
 }
 
-function isActiveBooking(booking: Booking) {
-  return booking.status === 'pending' || booking.status === 'confirmed'
-}
-
 function isValueActiveBooking(booking: Booking) {
   return booking.status !== 'cancelled' && booking.status !== 'no_show'
 }
@@ -131,11 +127,6 @@ function formatDuration(minutes: number) {
 function formatServicePrice(price: number | null | undefined) {
   if (price === null || price === undefined) return ''
   return moneyFormatter.format(Number(price))
-}
-
-function getScheduleBlockHeight(booking: Booking) {
-  const duration = getDurationMinutes(booking)
-  return Math.min(260, Math.max(150, duration * 1.8))
 }
 
 function getLocalDateKey(date: Date) {
@@ -407,20 +398,6 @@ export default function AdminPage() {
     )
   }, [knownBookings])
 
-  const todaySummary = useMemo(() => {
-    const activeBookings = visibleBookings.filter(isActiveBooking)
-    const totalBookedMinutes = activeBookings.reduce((sum, booking) => sum + getDurationMinutes(booking), 0)
-
-    return {
-      firstAppointment: visibleBookings[0] ? format(parseISO(visibleBookings[0].start_time), 'HH:mm') : 'None',
-      lastAppointment: visibleBookings[visibleBookings.length - 1]
-        ? format(parseISO(visibleBookings[visibleBookings.length - 1].end_time), 'HH:mm')
-        : 'None',
-      totalBookedTime: formatDuration(totalBookedMinutes),
-      activeCount: activeBookings.length,
-    }
-  }, [visibleBookings])
-
   if (authLoading) {
     return (
       <div className="min-h-screen bg-[#f7f8f4] px-4 py-8 text-brand-text">
@@ -661,7 +638,6 @@ export default function AdminPage() {
             </div>
           ) : (
             <>
-              {view === 'today' && <TodaySummary summary={todaySummary} />}
               {view === 'today' ? (
                 <TodaySchedule
                   bookings={visibleBookings}
@@ -1693,26 +1669,6 @@ function SettingsView() {
   )
 }
 
-function TodaySummary({
-  summary,
-}: {
-  summary: {
-    firstAppointment: string
-    lastAppointment: string
-    totalBookedTime: string
-    activeCount: number
-  }
-}) {
-  return (
-    <div className="mb-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-      <ScheduleStat label="First appointment" value={summary.firstAppointment} />
-      <ScheduleStat label="Last appointment" value={summary.lastAppointment} />
-      <ScheduleStat label="Booked time" value={summary.totalBookedTime} />
-      <ScheduleStat label="Pending/confirmed" value={summary.activeCount} />
-    </div>
-  )
-}
-
 function TodayEmptyState({ nextBooking }: { nextBooking?: Booking }) {
   const nextStart = nextBooking ? parseISO(nextBooking.start_time) : null
   const tomorrow = addDays(getLocalDayStart(), 1)
@@ -1723,10 +1679,19 @@ function TodayEmptyState({ nextBooking }: { nextBooking?: Booking }) {
     : 'No bookings today. Upcoming bookings will appear here once loaded.'
 
   return (
-    <div className="rounded-3xl border border-dashed border-brand-border bg-white px-6 py-14 text-center">
-      <h2 className="text-xl font-semibold text-brand-text">No bookings today</h2>
-      <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-brand-muted">{nextLabel}</p>
-    </div>
+    <section className="rounded-3xl border border-white bg-white/80 p-4 shadow-[0_12px_40px_rgba(44,44,44,0.05)]">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <h2 className="rounded-full bg-brand-sage px-3 py-1.5 text-sm font-semibold text-white">
+            {format(getLocalDayStart(), 'EEE d MMM')}
+          </h2>
+          <span className="rounded-full bg-brand-sage-light px-2.5 py-1 text-xs font-semibold text-brand-sage">
+            Today
+          </span>
+        </div>
+      </div>
+      <p className="mt-4 text-sm font-medium text-brand-muted">{nextLabel}</p>
+    </section>
   )
 }
 
@@ -2097,15 +2062,6 @@ function MonthView({ bookings }: { bookings: Booking[] }) {
   )
 }
 
-function ScheduleStat({ label, value }: { label: string; value: string | number }) {
-  return (
-    <div className="rounded-2xl border border-white bg-white px-4 py-3 shadow-[0_10px_30px_rgba(44,44,44,0.04)]">
-      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-brand-muted">{label}</p>
-      <p className="mt-1 text-lg font-semibold text-brand-text">{value}</p>
-    </div>
-  )
-}
-
 function TodaySchedule({
   bookings,
   updatingId,
@@ -2117,50 +2073,42 @@ function TodaySchedule({
   onUpdateStatus: (id: string, status: Booking['status']) => void
   onReschedule: (booking: Booking) => void
 }) {
-  return (
-    <div className="grid gap-3">
-      {bookings.map((booking, index) => {
-        const previous = bookings[index - 1]
-        const gap = previous ? differenceInMinutes(parseISO(booking.start_time), parseISO(previous.end_time)) : 0
+  const today = getLocalDayStart()
+  const revenue = bookings.filter(isValueActiveBooking).reduce((sum, booking) => sum + Number(booking.total_price || 0), 0)
 
-        return (
-          <div key={booking.id}>
-            {gap > 0 && <GapIndicator minutes={gap} />}
-            {gap < 0 && <GapIndicator minutes={Math.abs(gap)} overlap />}
-            <div className="grid gap-3 lg:grid-cols-[5rem_minmax(0,1fr)] lg:items-start">
-              <div className="hidden pt-5 text-right lg:block">
-                <p className="text-lg font-semibold text-brand-text">{format(parseISO(booking.start_time), 'HH:mm')}</p>
-                <p className="text-xs font-medium text-brand-muted">{format(parseISO(booking.end_time), 'HH:mm')}</p>
-              </div>
-              <BookingCard
-                booking={booking}
-                updating={updatingId === booking.id}
-                onUpdateStatus={onUpdateStatus}
-                onReschedule={onReschedule}
-                minHeight={getScheduleBlockHeight(booking)}
-                scheduleMode
-              />
-            </div>
-          </div>
-        )
-      })}
-    </div>
-  )
-}
-
-function GapIndicator({ minutes, overlap = false }: { minutes: number; overlap?: boolean }) {
   return (
-    <div className="my-2 flex items-center gap-3 lg:ml-20">
-      <div className="h-px flex-1 bg-brand-border" />
-      <span
-        className={`rounded-full px-3 py-1 text-xs font-semibold ${
-          overlap ? 'bg-rose-50 text-rose-700' : 'bg-brand-sage-light text-brand-sage'
-        }`}
-      >
-        {formatDuration(minutes)} {overlap ? 'overlap' : 'free'}
-      </span>
-      <div className="h-px flex-1 bg-brand-border" />
-    </div>
+    <section className="rounded-3xl border border-[#dfe6da] border-l-4 border-l-brand-sage bg-[#fbfcfa] p-4 shadow-[0_12px_40px_rgba(44,44,44,0.05)] ring-2 ring-brand-sage ring-offset-2 ring-offset-[#f7f8f4]">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-brand-border pb-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <h2 className="rounded-full bg-brand-sage px-3 py-1.5 text-sm font-semibold text-white">
+            {format(today, 'EEE d MMM')}
+          </h2>
+          <span className="rounded-full bg-brand-sage-light px-2.5 py-1 text-xs font-semibold text-brand-sage">
+            Today
+          </span>
+          <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-brand-muted ring-1 ring-brand-border">
+            {bookings.length} {bookings.length === 1 ? 'booking' : 'bookings'}
+          </span>
+        </div>
+        {revenue > 0 && (
+          <span className="rounded-full bg-brand-text px-3 py-1.5 text-xs font-semibold text-white shadow-sm">
+            {moneyFormatter.format(revenue)}
+          </span>
+        )}
+      </div>
+
+      <div className="grid gap-2">
+        {bookings.map((booking) => (
+          <WeekBookingRow
+            key={booking.id}
+            booking={booking}
+            updating={updatingId === booking.id}
+            onUpdateStatus={onUpdateStatus}
+            onReschedule={onReschedule}
+          />
+        ))}
+      </div>
+    </section>
   )
 }
 
