@@ -1,25 +1,9 @@
 # LaylaBook v2
-
 LaylaBook is a React, TypeScript, and Supabase booking system for a salon workflow. It handles public appointment booking, dynamic availability, secure admin management, rescheduling, client profiles, and schedule controls.
 
----
+Built for a real salon use case with production-style scheduling logic and database-level validation.
 
-## How the System Works
-
-This project is built around a simple idea:
-
-> **Availability is not stored. It is generated dynamically.**
-
-Instead of pre-creating time slots and trying to keep them in sync, the system calculates availability in real time based on rules and existing bookings.
-
-At the core of this is a Supabase RPC function (`get_available_slots`) which:
-
-* Reads the salon's working hours for the selected day
-* Checks if the date is blocked for days off or holidays
-* Generates possible time slots using SQL
-* Filters out slots that overlap with active bookings
-
-This means the system always returns current availability without needing to manage or update slot data manually.
+**Live demo:** https://laylabookv2.vercel.app/
 
 ---
 
@@ -184,6 +168,25 @@ This keeps important business logic in the database rather than relying only on 
 
 ---
 
+## How the System Works
+
+This project is built around a simple idea:
+
+> **Availability is not stored. It is generated dynamically.**
+
+Instead of pre-creating time slots and trying to keep them in sync, the system calculates availability in real time based on rules and existing bookings.
+
+At the core of this is a Supabase RPC function (`get_available_slots`) which:
+
+* Reads the salon's working hours for the selected day
+* Checks if the date is blocked for days off or holidays
+* Generates possible time slots using SQL
+* Filters out slots that overlap with active bookings
+
+This means the system always returns current availability without needing to manage or update slot data manually.
+
+---
+
 ## Key Design Decisions
 
 Some of the main decisions behind this system:
@@ -237,11 +240,4 @@ Potential future improvements include:
 
 ## What I Learned
 
-Building this project helped me understand:
-
-* How to design real-world scheduling systems
-* How to handle availability and conflicts correctly
-* How to use Supabase RPC functions for backend logic
-* How to secure a frontend app with Supabase Auth and RLS
-* How to model bookings, services, rescheduling, and client profiles
-* How to balance a polished admin UX with reliable database constraints
+Building this project helped me understand how to design real-world scheduling systems, handle availability and conflicts correctly, use Supabase RPC functions for backend logic, secure a frontend app with Supabase Auth and RLS, model bookings and client profiles and balance polished admin UX with reliable database constraints.
