@@ -1,4 +1,5 @@
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useCallback, useRef, type FormEvent } from 'react'
+import type { Session } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
 import {
   addDays,
@@ -15,8 +16,6 @@ import {
   startOfWeek,
 } from 'date-fns'
 import type { BlockedDate, Booking, WorkingHours } from '../types'
-
-const ADMIN_PASSWORD = 'layla2026'
 
 type AdminView = 'today' | 'week' | 'month' | 'list' | 'settings'
 type StatusFilter = 'all' | Booking['status']
@@ -156,8 +155,11 @@ function sortBlockedDates(dates: BlockedDate[]) {
 }
 
 export default function AdminPage() {
+  const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [authenticated, setAuthenticated] = useState(false)
+  const [session, setSession] = useState<Session | null>(null)
+  const [authLoading, setAuthLoading] = useState(true)
+  const [loginLoading, setLoginLoading] = useState(false)
   const [bookings, setBookings] = useState<Booking[]>([])
   const [knownBookings, setKnownBookings] = useState<Booking[]>([])
   const [loading, setLoading] = useState(true)
@@ -166,8 +168,15 @@ export default function AdminPage() {
   const [search, setSearch] = useState('')
   const [errorMessage, setErrorMessage] = useState('')
   const [updatingId, setUpdatingId] = useState<string | null>(null)
+  const viewRef = useRef(view)
 
-  async function fetchBookings(nextView = view) {
+  useEffect(() => {
+    viewRef.current = view
+  }, [view])
+
+  const fetchBookings = useCallback(async (nextView?: AdminView) => {
+    const targetView = nextView ?? viewRef.current
+
     setLoading(true)
     setErrorMessage('')
 
@@ -176,15 +185,15 @@ export default function AdminPage() {
       .select('*, booking_services(name_at_booking, is_primary, price_at_booking)')
       .order('start_time', { ascending: true })
 
-    if (nextView === 'today') {
+    if (targetView === 'today') {
       const start = getLocalDayStart()
       const end = addDays(start, 1)
       query = query.gte('start_time', start.toISOString()).lt('start_time', end.toISOString())
-    } else if (nextView === 'week') {
+    } else if (targetView === 'week') {
       const start = getLocalDayStart()
       const end = addDays(start, 7)
       query = query.gte('start_time', start.toISOString()).lt('start_time', end.toISOString())
-    } else if (nextView === 'month') {
+    } else if (targetView === 'month') {
       const start = startOfMonth(getLocalDayStart())
       const end = addMonths(start, 1)
       query = query.gte('start_time', start.toISOString()).lt('start_time', end.toISOString())
@@ -202,17 +211,74 @@ export default function AdminPage() {
     }
 
     setLoading(false)
-  }
+  }, [])
 
-  const handleLogin = () => {
-    if (password === ADMIN_PASSWORD) {
-      setAuthenticated(true)
+  useEffect(() => {
+    let mounted = true
+
+    supabase.auth.getSession().then(({ data }) => {
+      if (!mounted) return
+
+      const nextSession = data.session
+
+      setSession(nextSession)
+      setAuthLoading(false)
+
+      if (nextSession) {
+        void fetchBookings('today')
+      } else {
+        setLoading(false)
+      }
+    })
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      setSession(nextSession)
+      setAuthLoading(false)
+
+      if (!nextSession) {
+        setBookings([])
+        setKnownBookings([])
+        setLoading(false)
+      } else {
+        void fetchBookings('today')
+      }
+    })
+
+    return () => {
+      mounted = false
+      subscription.unsubscribe()
+    }
+  }, [fetchBookings])
+
+  const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setLoginLoading(true)
+    setErrorMessage('')
+
+    const { error } = await supabase.auth.signInWithPassword({
+      email: email.trim(),
+      password,
+    })
+
+    if (error) {
+      setErrorMessage('Could not sign in. Check your email and password.')
+    } else {
       setPassword('')
-      void fetchBookings('today')
-      return
     }
 
-    setErrorMessage('That password is not right.')
+    setLoginLoading(false)
+  }
+
+  const handleLogout = async () => {
+    setErrorMessage('')
+
+    const { error } = await supabase.auth.signOut()
+
+    if (error) {
+      setErrorMessage('Could not sign out. Please try again.')
+    }
   }
 
   const updateStatus = async (id: string, status: Booking['status']) => {
@@ -304,7 +370,19 @@ export default function AdminPage() {
     }
   }, [visibleBookings])
 
-  if (!authenticated) {
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-[#f7f8f4] px-4 py-8 text-brand-text">
+        <div className="mx-auto flex min-h-[calc(100vh-4rem)] max-w-6xl items-center justify-center">
+          <div className="w-full max-w-md rounded-[2rem] border border-white/80 bg-white p-8 shadow-[0_24px_80px_rgba(44,44,44,0.10)]">
+            <p className="text-sm font-medium text-brand-muted">Checking admin session...</p>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (!session) {
     return (
       <div className="min-h-screen bg-[#f7f8f4] px-4 py-8 text-brand-text">
         <div className="mx-auto flex min-h-[calc(100vh-4rem)] max-w-6xl items-center justify-center">
@@ -319,7 +397,23 @@ export default function AdminPage() {
               </p>
             </div>
 
-            <div className="space-y-3">
+            <form className="space-y-3" onSubmit={handleLogin}>
+              <label className="block text-sm font-medium text-brand-text" htmlFor="admin-email">
+                Email
+              </label>
+              <input
+                id="admin-email"
+                type="email"
+                placeholder="you@example.com"
+                value={email}
+                required
+                autoComplete="email"
+                onChange={(event) => {
+                  setEmail(event.target.value)
+                  setErrorMessage('')
+                }}
+                className="w-full rounded-2xl border border-brand-border bg-brand-bg px-4 py-3 text-sm text-brand-text outline-none transition focus:border-brand-sage focus:ring-4 focus:ring-brand-sage-light"
+              />
               <label className="block text-sm font-medium text-brand-text" htmlFor="admin-password">
                 Password
               </label>
@@ -328,21 +422,23 @@ export default function AdminPage() {
                 type="password"
                 placeholder="Enter password"
                 value={password}
+                required
+                autoComplete="current-password"
                 onChange={(event) => {
                   setPassword(event.target.value)
                   setErrorMessage('')
                 }}
-                onKeyDown={(event) => event.key === 'Enter' && handleLogin()}
                 className="w-full rounded-2xl border border-brand-border bg-brand-bg px-4 py-3 text-sm text-brand-text outline-none transition focus:border-brand-sage focus:ring-4 focus:ring-brand-sage-light"
               />
               {errorMessage && <p className="text-sm text-rose-600">{errorMessage}</p>}
               <button
-                onClick={handleLogin}
-                className="w-full rounded-2xl bg-brand-text px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-black focus:outline-none focus:ring-4 focus:ring-brand-sage-light"
+                type="submit"
+                disabled={loginLoading}
+                className="w-full rounded-2xl bg-brand-text px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-black focus:outline-none focus:ring-4 focus:ring-brand-sage-light disabled:cursor-not-allowed disabled:opacity-60"
               >
-                Enter Dashboard
+                {loginLoading ? 'Signing in...' : 'Enter Dashboard'}
               </button>
-            </div>
+            </form>
           </div>
         </div>
       </div>
@@ -373,7 +469,7 @@ export default function AdminPage() {
               </button>
             )}
             <button
-              onClick={() => setAuthenticated(false)}
+              onClick={() => void handleLogout()}
               className="rounded-2xl bg-brand-text px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-black"
             >
               Sign out
