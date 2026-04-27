@@ -36,6 +36,7 @@ interface ClientProfile {
   id: string
   name: string
   phone: string
+  email: string | null
   notes: string | null
   created_at: string
   bookings?: ClientBooking[]
@@ -714,7 +715,7 @@ function ClientsView({ onSaved }: { onSaved: (message: string) => void }) {
       const { data, error } = await supabase
         .from('clients')
         .select(
-          'id,name,phone,notes,created_at,bookings(id,client_name,client_phone,status,start_time,end_time,total_price,notes,created_at,booking_services(name_at_booking,is_primary,price_at_booking))'
+          'id,name,phone,email,notes,created_at,bookings(id,client_name,client_phone,status,start_time,end_time,total_price,notes,created_at,booking_services(name_at_booking,is_primary,price_at_booking))'
         )
         .order('name')
 
@@ -758,6 +759,7 @@ function ClientsView({ onSaved }: { onSaved: (message: string) => void }) {
       (client) =>
         client.name.toLowerCase().includes(normalizedSearch) ||
         client.phone.toLowerCase().includes(normalizedSearch) ||
+        (client.email || '').toLowerCase().includes(normalizedSearch) ||
         (client.notes || '').toLowerCase().includes(normalizedSearch)
     )
   }, [clients, search])
@@ -833,7 +835,7 @@ function ClientsView({ onSaved }: { onSaved: (message: string) => void }) {
             <input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search by name, phone, or notes"
+              placeholder="Search by name, phone, email, or notes"
               className="w-full rounded-2xl border border-brand-border bg-brand-bg px-4 py-3 text-sm outline-none transition focus:border-brand-sage focus:ring-4 focus:ring-brand-sage-light"
             />
           </label>
@@ -879,6 +881,15 @@ function ClientsView({ onSaved }: { onSaved: (message: string) => void }) {
                     >
                       {client.phone}
                     </a>
+                    {client.email && (
+                      <a
+                        href={`mailto:${client.email}`}
+                        onClick={(event) => event.stopPropagation()}
+                        className="mt-0.5 block truncate text-sm text-brand-muted hover:text-brand-text"
+                      >
+                        {client.email}
+                      </a>
+                    )}
                   </div>
                   <Detail label="Bookings" value={bookingCountLabel} />
                   <Detail

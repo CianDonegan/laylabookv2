@@ -6,12 +6,21 @@
 //   RESEND_FROM_EMAIL  — verified sender, e.g. "Beauty by Layla <bookings@beautybylayla.ie>"
 
 const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY') ?? ''
-// Update RESEND_FROM_EMAIL secret to match your verified Resend sender domain.
 const FROM_EMAIL = Deno.env.get('RESEND_FROM_EMAIL') ?? 'Beauty by Layla <bookings@beautybylayla.ie>'
 
-const CORS_HEADERS = {
+const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+}
+
+// Every response must include CORS headers — without them the browser blocks
+// the response even if the status is 200.
+function respond(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json', ...CORS },
+  })
 }
 
 interface Service {
@@ -185,25 +194,19 @@ function buildHtml(payload: Payload): string {
 
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: CORS_HEADERS })
+    return new Response('ok', { headers: CORS })
   }
 
   if (!req.headers.get('Authorization')) {
-    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-      status: 401,
-      headers: { 'Content-Type': 'application/json' },
-    })
+    return respond({ error: 'Unauthorized' }, 401)
   }
 
   try {
     const payload: Payload = await req.json()
-    const { clientName, clientEmail, startTime, services, totalPrice } = payload
+    const { clientName, clientEmail, startTime, services } = payload
 
     if (!clientEmail || !clientName || !startTime || !services) {
-      return new Response(JSON.stringify({ error: 'Missing required fields' }), {
-        status: 400,
-        headers: { 'Content-Type': 'application/json' },
-      })
+      return respond({ error: 'Missing required fields' }, 400)
     }
 
     const html = buildHtml(payload)
@@ -225,21 +228,12 @@ Deno.serve(async (req: Request) => {
     if (!resendRes.ok) {
       const detail = await resendRes.text()
       console.error('Resend error:', detail)
-      return new Response(JSON.stringify({ error: detail }), {
-        status: 500,
-        headers: { 'Content-Type': 'application/json' },
-      })
+      return respond({ error: detail }, 500)
     }
 
-    return new Response(JSON.stringify({ ok: true }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    })
+    return respond({ ok: true })
   } catch (err) {
     console.error('send-booking-confirmation error:', err)
-    return new Response(JSON.stringify({ error: String(err) }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' },
-    })
+    return respond({ error: String(err) }, 500)
   }
 })

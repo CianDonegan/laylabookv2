@@ -51,16 +51,33 @@ export function useBooking(): UseBookingReturn {
 
       setBookingId(data)
 
-      // Fire-and-forget — email failure must never break the booking flow.
-      void supabase.functions.invoke('send-booking-confirmation', {
-        body: {
-          clientName: payload.name.trim(),
-          clientEmail: payload.email.trim(),
-          startTime: payload.startTime,
-          services: payload.services,
-          totalPrice: payload.totalPrice,
-        },
-      })
+      // Temporary debug logging — remove once confirmed working.
+      console.log('[booking] created id:', data, 'phone:', payload.phone.trim(), 'email:', payload.email.trim())
+
+      supabase
+        .rpc('save_booking_email', {
+          p_phone: payload.phone.trim(),
+          p_email: payload.email.trim(),
+        })
+        .then(({ error }) => {
+          if (error) console.error('[save_booking_email] failed:', error)
+          else console.log('[save_booking_email] ok')
+        })
+
+      supabase.functions
+        .invoke('send-booking-confirmation', {
+          body: {
+            clientName: payload.name.trim(),
+            clientEmail: payload.email.trim(),
+            startTime: payload.startTime,
+            services: payload.services,
+            totalPrice: payload.totalPrice,
+          },
+        })
+        .then(({ error }) => {
+          if (error) console.error('[send-booking-confirmation] failed:', error)
+          else console.log('[send-booking-confirmation] ok')
+        })
 
       return data
     } catch (err) {
