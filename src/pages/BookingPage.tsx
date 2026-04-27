@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react'
-import { format, parseISO } from 'date-fns'
+import { addMinutes, format, parseISO } from 'date-fns'
 import Hero from '../components/booking/Hero'
 import PolicyCard from '../components/booking/PolicyCard'
 import ServicePicker from '../components/booking/ServicePicker'
@@ -22,12 +22,12 @@ export default function BookingPage() {
   const [selectedAddons, setSelectedAddons] = useState<Service[]>([])
   const [selectedDate, setSelectedDate] = useState('')
   const [selectedTime, setSelectedTime] = useState('')
-  const [form, setForm] = useState({ name: '', phone: '' })
+  const [form, setForm] = useState({ name: '', email: '', phone: '' })
   const [submitted, setSubmitted] = useState(false)
 
   const { services, loading: servicesLoading, error: servicesError } = useServices()
-  const { hours: workingHours, loading: workingHoursLoading } = useWorkingHours()
-  const { dates: blockedDates, loading: blockedDatesLoading } = useBlockedDates()
+  const { hours: workingHours, loading: workingHoursLoading, error: workingHoursError } = useWorkingHours()
+  const { dates: blockedDates, loading: blockedDatesLoading, error: blockedDatesError } = useBlockedDates()
 
   const primaryServices = useMemo(() => services.filter((s) => !s.is_addon), [services])
   const addonServices = useMemo(() => services.filter((s) => s.is_addon), [services])
@@ -60,7 +60,7 @@ export default function BookingPage() {
 
   const isDateBlocked = (dateStr: string) => {
     if (blockedDates.includes(dateStr)) return true
-    const day = new Date(dateStr).getDay()
+    const day = parseISO(dateStr).getDay()
     const hours = workingHours.find((wh) => wh.day_of_week === day)
     return !hours?.is_open
   }
@@ -89,10 +89,8 @@ export default function BookingPage() {
   const handleSubmit = async () => {
     if (!primaryService || !selectedDate || !selectedTime) return
 
-    const [h, m] = selectedTime.split(':').map(Number)
-    const endTotal = h * 60 + m + totalDuration
-    const endTime = `${selectedDate}T${String(Math.floor(endTotal / 60)).padStart(2, '0')}:${String(endTotal % 60).padStart(2, '0')}:00`
     const startTime = `${selectedDate}T${selectedTime}:00`
+    const endTime = format(addMinutes(parseISO(startTime), totalDuration), "yyyy-MM-dd'T'HH:mm:ss")
 
     const servicesPayload = [
       {
@@ -112,6 +110,7 @@ export default function BookingPage() {
     try {
       await submitBooking({
         name: form.name,
+        email: form.email,
         phone: form.phone,
         startTime,
         endTime,
@@ -134,9 +133,9 @@ export default function BookingPage() {
 
         {policyAccepted && (
           <>
-            {servicesError ? (
+            {servicesError || workingHoursError || blockedDatesError ? (
               <FlowNotice
-                title="Services could not load"
+                title="Could not load booking options"
                 message="Please refresh the page and try again."
                 tone="error"
               />

@@ -34,7 +34,7 @@ export interface Booking {
   status: 'pending' | 'confirmed' | 'cancelled' | 'completed' | 'no_show'
   start_time: string
   end_time: string
-  total_price: number
+  total_price: string
   notes: string | null
   created_at: string
   booking_services?: BookingService[]
@@ -45,12 +45,13 @@ export interface BookingService {
   booking_id: string
   service_id: string
   is_primary: boolean
-  price_at_booking: number
+  price_at_booking: string
   name_at_booking: string
 }
 
 export interface BookingPayload {
   name: string
+  email: string
   phone: string
   startTime: string
   endTime: string

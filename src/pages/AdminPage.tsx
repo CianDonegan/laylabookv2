@@ -178,6 +178,7 @@ export default function AdminPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [session, setSession] = useState<Session | null>(null)
+  const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null)
   const [authLoading, setAuthLoading] = useState(true)
   const [loginLoading, setLoginLoading] = useState(false)
   const [bookings, setBookings] = useState<Booking[]>([])
@@ -190,6 +191,8 @@ export default function AdminPage() {
   const [successMessage, setSuccessMessage] = useState('')
   const [updatingId, setUpdatingId] = useState<string | null>(null)
   const [reschedulingBooking, setReschedulingBooking] = useState<Booking | null>(null)
+  const { hours: workingHours } = useWorkingHours()
+  const { dates: blockedDates } = useBlockedDates()
   const viewRef = useRef(view)
 
   useEffect(() => {
@@ -203,6 +206,15 @@ export default function AdminPage() {
 
     return () => window.clearTimeout(timeoutId)
   }, [successMessage])
+
+  const checkAdminAccess = useCallback(async (userId: string): Promise<boolean> => {
+    const { data, error } = await supabase
+      .from('admin_users')
+      .select('user_id')
+      .eq('user_id', userId)
+      .maybeSingle()
+    return !error && data !== null
+  }, [])
 
   const fetchBookings = useCallback(async (nextView?: AdminView) => {
     const targetView = nextView ?? viewRef.current
@@ -246,41 +258,52 @@ export default function AdminPage() {
   useEffect(() => {
     let mounted = true
 
-    supabase.auth.getSession().then(({ data }) => {
+    async function resolveSession(nextSession: Session | null) {
+      setSession(nextSession)
+
+      if (!nextSession) {
+        setIsAuthorized(null)
+        setBookings([])
+        setKnownBookings([])
+        setAuthLoading(false)
+        setLoading(false)
+        return
+      }
+
+      const authorized = await checkAdminAccess(nextSession.user.id)
       if (!mounted) return
 
-      const nextSession = data.session
-
-      setSession(nextSession)
-      setAuthLoading(false)
-
-      if (nextSession) {
-        void fetchBookings('today')
-      } else {
+      if (!authorized) {
+        setIsAuthorized(false)
+        setErrorMessage("Your account doesn't have admin access.")
+        setAuthLoading(false)
         setLoading(false)
+        await supabase.auth.signOut()
+        return
       }
+
+      setIsAuthorized(true)
+      setAuthLoading(false)
+      void fetchBookings('today')
+    }
+
+    supabase.auth.getSession().then(({ data }) => {
+      if (!mounted) return
+      void resolveSession(data.session)
     })
 
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, nextSession) => {
-      setSession(nextSession)
-      setAuthLoading(false)
-
-      if (!nextSession) {
-        setBookings([])
-        setKnownBookings([])
-        setLoading(false)
-      } else {
-        void fetchBookings('today')
-      }
+      if (!mounted) return
+      void resolveSession(nextSession)
     })
 
     return () => {
       mounted = false
       subscription.unsubscribe()
     }
-  }, [fetchBookings])
+  }, [fetchBookings, checkAdminAccess])
 
   const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -302,13 +325,7 @@ export default function AdminPage() {
   }
 
   const handleLogout = async () => {
-    setErrorMessage('')
-
-    const { error } = await supabase.auth.signOut()
-
-    if (error) {
-      setErrorMessage('Could not sign out. Please try again.')
-    }
+    await supabase.auth.signOut()
   }
 
   const updateStatus = async (id: string, status: Booking['status']) => {
@@ -322,19 +339,16 @@ export default function AdminPage() {
       .eq('id', id)
       .select('id,status')
 
-    if (error) {
+    if (error || !data || data.length === 0) {
       setErrorMessage('Could not update this booking. Please try again.')
       setUpdatingId(null)
       return
     }
 
-    if (!data || data.length === 0) {
-      setErrorMessage('Could not update booking. Please try again.')
-      setUpdatingId(null)
-      return
-    }
-
-    await fetchBookings()
+    const patch = (b: Booking): Booking => b.id === id ? { ...b, status } : b
+    setBookings((prev) => prev.map(patch))
+    setKnownBookings((prev) => prev.map(patch))
+    setSuccessMessage('Status updated.')
     setUpdatingId(null)
   }
 
@@ -363,12 +377,11 @@ export default function AdminPage() {
     const todayStart = getLocalDayStart()
     const tomorrowStart = addDays(todayStart, 1)
     const weekEnd = addDays(todayStart, 7)
-    const statsSource = knownBookings.length > 0 ? knownBookings : bookings
-    const todayBookings = statsSource.filter((booking) => {
+    const todayBookings = bookings.filter((booking) => {
       const startTime = parseISO(booking.start_time).getTime()
       return startTime >= todayStart.getTime() && startTime < tomorrowStart.getTime()
     })
-    const weekBookings = statsSource.filter((booking) => {
+    const weekBookings = bookings.filter((booking) => {
       const startTime = parseISO(booking.start_time).getTime()
       return startTime >= todayStart.getTime() && startTime < weekEnd.getTime()
     })
@@ -381,7 +394,7 @@ export default function AdminPage() {
       todayRevenue: getBookingValue(todayBookings),
       weekRevenue: getBookingValue(weekBookings),
     }
-  }, [bookings, knownBookings])
+  }, [bookings])
 
   const nextUpcomingBooking = useMemo(() => {
     const tomorrowStart = addDays(getLocalDayStart(), 1)
@@ -405,7 +418,7 @@ export default function AdminPage() {
     )
   }
 
-  if (!session) {
+  if (!session || isAuthorized === false) {
     return (
       <div className="min-h-screen bg-[#f7f8f4] px-4 py-8 text-brand-text">
         <div className="mx-auto flex min-h-[calc(100vh-4rem)] max-w-6xl items-center justify-center">
@@ -621,7 +634,7 @@ export default function AdminPage() {
               onReschedule={setReschedulingBooking}
             />
           ) : view === 'month' ? (
-            <MonthView bookings={visibleBookings} />
+            <MonthView bookings={visibleBookings} workingHours={workingHours} />
           ) : view === 'today' && bookings.length === 0 ? (
             <TodayEmptyState nextBooking={nextUpcomingBooking} />
           ) : visibleBookings.length === 0 ? (
@@ -658,6 +671,8 @@ export default function AdminPage() {
           booking={reschedulingBooking}
           onClose={() => setReschedulingBooking(null)}
           onRescheduled={handleRescheduled}
+          workingHours={workingHours}
+          blockedDates={blockedDates}
         />
       )}
     </div>
@@ -1011,18 +1026,20 @@ function RescheduleModal({
   booking,
   onClose,
   onRescheduled,
+  workingHours,
+  blockedDates,
 }: {
   booking: Booking
   onClose: () => void
   onRescheduled: () => Promise<void>
+  workingHours: WorkingHours[]
+  blockedDates: string[]
 }) {
   const [selectedDate, setSelectedDate] = useState('')
   const [selectedTime, setSelectedTime] = useState('')
   const [confirming, setConfirming] = useState(false)
   const [saving, setSaving] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
-  const { hours: workingHours, loading: loadingWorkingHours } = useWorkingHours()
-  const { dates: blockedDates, loading: loadingBlockedDates } = useBlockedDates()
   const durationMinutes = getDurationMinutes(booking)
   const {
     slots,
@@ -1033,12 +1050,11 @@ function RescheduleModal({
   const oldEnd = parseISO(booking.end_time)
   const newStart = selectedDate && selectedTime ? parseISO(buildLocalDateTime(selectedDate, selectedTime)) : null
   const newEnd = newStart ? addMinutes(newStart, durationMinutes) : null
-  const setupLoading = loadingWorkingHours || loadingBlockedDates
 
   const isDateBlocked = (dateStr: string) => {
     if (blockedDates.includes(dateStr)) return true
 
-    const day = new Date(dateStr).getDay()
+    const day = parseISO(dateStr).getDay()
     const hours = workingHours.find((row) => row.day_of_week === day)
 
     return !hours?.is_open
@@ -1063,19 +1079,22 @@ function RescheduleModal({
     setSaving(true)
     setErrorMessage('')
 
-    const { error } = await supabase.rpc('reschedule_booking', {
-      p_booking_id: booking.id,
-      p_start_time: buildLocalDateTime(selectedDate, selectedTime),
-    })
+    try {
+      const { error } = await supabase.rpc('reschedule_booking', {
+        p_booking_id: booking.id,
+        p_start_time: buildLocalDateTime(selectedDate, selectedTime),
+      })
 
-    if (error) {
-      setErrorMessage(error.message || 'Could not reschedule this booking. Please try again.')
+      if (error) {
+        setErrorMessage(error.message || 'Could not reschedule this booking. Please try again.')
+        setConfirming(false)
+        return
+      }
+
+      await onRescheduled()
+    } finally {
       setSaving(false)
-      setConfirming(false)
-      return
     }
-
-    await onRescheduled()
   }
 
   return (
@@ -1118,32 +1137,27 @@ function RescheduleModal({
           </div>
         )}
 
-        {setupLoading ? (
-          <div className="rounded-2xl border border-white bg-white px-4 py-5 text-sm font-medium text-brand-muted">
-            Loading schedule rules...
-          </div>
-        ) : (
-          <>
-            {!confirming && (
-              <>
-                <DatePicker
-                  selectedDate={selectedDate}
-                  onSelect={handleSelectDate}
-                  isDateBlocked={isDateBlocked}
-                  minDate={getLocalToday()}
-                />
+        <>
+          {!confirming && (
+            <>
+              <DatePicker
+                selectedDate={selectedDate}
+                onSelect={handleSelectDate}
+                isDateBlocked={isDateBlocked}
+                minDate={getLocalToday()}
+              />
 
-                {selectedDate && (
-                  <TimeGrid
-                    slots={slots}
-                    selectedTime={selectedTime}
-                    onSelect={handleSelectTime}
-                    loading={loadingSlots}
-                    error={slotsError}
-                  />
-                )}
-              </>
-            )}
+              {selectedDate && (
+                <TimeGrid
+                  slots={slots}
+                  selectedTime={selectedTime}
+                  onSelect={handleSelectTime}
+                  loading={loadingSlots}
+                  error={slotsError}
+                />
+              )}
+            </>
+          )}
 
             {selectedDate && selectedTime && !confirming && (
               <div className="flex flex-wrap justify-end gap-2">
@@ -1183,8 +1197,7 @@ function RescheduleModal({
                 </div>
               </div>
             )}
-          </>
-        )}
+        </>
       </div>
     </div>
   )
@@ -1936,8 +1949,7 @@ function WeekBookingRow({
 
 const monthWeekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
-function MonthView({ bookings }: { bookings: Booking[] }) {
-  const { hours: monthlyWorkingHours, loading: workingHoursLoading } = useWorkingHours()
+function MonthView({ bookings, workingHours: monthlyWorkingHours }: { bookings: Booking[]; workingHours: WorkingHours[] }) {
   const todayKey = getLocalDateKey(new Date())
   const monthStart = startOfMonth(getLocalDayStart())
   const monthEnd = endOfMonth(monthStart)
@@ -1997,7 +2009,7 @@ function MonthView({ bookings }: { bookings: Booking[] }) {
           const inMonth = isSameMonth(day, monthStart)
           const isToday = key === todayKey
           const dayHours = monthlyWorkingHours.find((row) => row.day_of_week === day.getDay())
-          const closed = !workingHoursLoading && !dayHours?.is_open
+          const closed = !dayHours?.is_open
           const hasBookings = dayBookings.length > 0
           const cellClass = hasBookings
             ? 'border-[#cfdcc8] bg-[#f1f6ee] shadow-[inset_0_0_0_1px_rgba(143,161,127,0.10)]'

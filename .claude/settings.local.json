@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git -C /c/laylabook-v2 log --oneline)",
+      "Bash(git *)",
+      "Bash(npm run *)"
+    ]
+  }
+}

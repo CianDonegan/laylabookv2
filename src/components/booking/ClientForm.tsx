@@ -1,8 +1,8 @@
 import type { Service } from '../../types'
 
 interface ClientFormProps {
-  form: { name: string; phone: string }
-  onChange: (form: { name: string; phone: string }) => void
+  form: { name: string; email: string; phone: string }
+  onChange: (form: { name: string; email: string; phone: string }) => void
   onSubmit: () => void
   loading: boolean
   error: string | null
@@ -29,10 +29,12 @@ function formatPrice(price: string) {
 export default function ClientForm({ form, onChange, onSubmit, loading, error, summary }: ClientFormProps) {
   const cleanPhone = form.phone.replace(/\s/g, '')
   const nameStarted = form.name.length > 0
+  const emailStarted = form.email.length > 0
   const phoneStarted = form.phone.length > 0
   const nameValid = form.name.trim().length >= 2
-  const phoneValid = /^(\+353|0)\d{8,9}$/.test(cleanPhone)
-  const isValid = nameValid && phoneValid
+  const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())
+  const phoneValid = /^(\+353\d{7,9}|0\d{8,9}|\+44\d{10})$/.test(cleanPhone)
+  const isValid = nameValid && emailValid && phoneValid
 
   return (
     <div className="mb-4 overflow-hidden rounded-[1.5rem] border border-brand-border/70 bg-white shadow-[0_10px_30px_rgba(44,44,44,0.04)]">
@@ -74,6 +76,27 @@ export default function ClientForm({ form, onChange, onSubmit, loading, error, s
           </div>
 
           <div>
+            <label htmlFor="client-email" className="mb-1.5 block text-xs font-semibold text-brand-text">
+              Email address
+            </label>
+            <input
+              id="client-email"
+              name="email"
+              type="email"
+              autoComplete="email"
+              placeholder="you@example.com"
+              value={form.email}
+              onChange={(e) => onChange({ ...form, email: e.target.value })}
+              className="w-full rounded-2xl border border-[#dfe6da] bg-white px-4 py-3 text-sm text-brand-text shadow-[0_1px_0_rgba(44,44,44,0.02)] transition-all placeholder:text-[#b8bdb4] focus:border-[#8fa17f] focus:outline-none focus:ring-2 focus:ring-[#8fa17f]/20"
+            />
+            {emailStarted && !emailValid && (
+              <p className="mt-1.5 text-xs font-medium text-red-500">
+                Please enter a valid email address.
+              </p>
+            )}
+          </div>
+
+          <div>
             <label htmlFor="client-phone" className="mb-1.5 block text-xs font-semibold text-brand-text">
               Phone number
             </label>
@@ -83,13 +106,13 @@ export default function ClientForm({ form, onChange, onSubmit, loading, error, s
               type="tel"
               inputMode="tel"
               autoComplete="tel"
-              placeholder="08xxxxxxxx or +353xxxxxxxxx"
+              placeholder="08xxxxxxxx, +353xxxxxxxx or +44xxxxxxxxxx"
               value={form.phone}
               onChange={(e) => onChange({ ...form, phone: e.target.value })}
               className="w-full rounded-2xl border border-[#dfe6da] bg-white px-4 py-3 text-sm text-brand-text shadow-[0_1px_0_rgba(44,44,44,0.02)] transition-all placeholder:text-[#b8bdb4] focus:border-[#8fa17f] focus:outline-none focus:ring-2 focus:ring-[#8fa17f]/20"
             />
             <p className={`mt-1.5 text-xs ${phoneStarted && !phoneValid ? 'text-red-500' : 'text-brand-muted'}`}>
-              Use an Irish mobile number, starting with 08 or +353.
+              Irish numbers starting with 08 or +353, or UK numbers starting with +44.
             </p>
           </div>
         </div>

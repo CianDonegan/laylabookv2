@@ -50,6 +50,18 @@ export function useBooking(): UseBookingReturn {
       if (!data) throw new Error('No booking ID returned')
 
       setBookingId(data)
+
+      // Fire-and-forget — email failure must never break the booking flow.
+      void supabase.functions.invoke('send-booking-confirmation', {
+        body: {
+          clientName: payload.name.trim(),
+          clientEmail: payload.email.trim(),
+          startTime: payload.startTime,
+          services: payload.services,
+          totalPrice: payload.totalPrice,
+        },
+      })
+
       return data
     } catch (err) {
       const msg = getBookingErrorMessage(err)

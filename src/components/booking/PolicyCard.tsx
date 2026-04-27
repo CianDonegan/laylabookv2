@@ -5,7 +5,7 @@ const POLICIES: [string, string][] = [
   ['Refills', "Refills over other artists' nails or lash work are not offered."],
   ['Punctuality', 'Late arrivals over 10 mins may result in a shortened service or rescheduling.'],
   ['Cancellations', '24 hours notice required for all cancellations.'],
-  ['Confirmations', 'A confirmation text will be sent within 24 hours.'],
+  ['Confirmations', 'A confirmation email will be sent when your booking is accepted.'],
   ['No-Shows', 'Clients who do not attend without notice will be unable to book future appointments.'],
   ['Patch Testing', 'Required for waxing and tinting services. Please schedule in advance.'],
   ['Media Consent', 'Photos or videos taken may be posted to social media. Let me know if you do not consent.'],

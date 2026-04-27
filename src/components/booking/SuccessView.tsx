@@ -9,8 +9,7 @@ export default function SuccessView() {
         />
         <h2 className="mb-3 text-2xl font-semibold text-brand-text">Request received</h2>
         <p className="text-sm leading-relaxed text-brand-muted">
-          Thank you for booking with Beauty by Layla. You'll receive a text once your appointment is
-          confirmed.
+          Thank you for booking with Beauty by Layla. A confirmation email has been sent to your inbox.
         </p>
       </div>
     </div>
