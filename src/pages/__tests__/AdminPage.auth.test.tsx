@@ -118,7 +118,6 @@ describe('AdminPage — authentication', () => {
     const selectMock = vi.fn().mockReturnValue({ eq: eqMock })
     mockSupabase.from.mockImplementation((table: string) => {
       if (table === 'admin_users') return { select: selectMock }
-      const { makeQueryChain } = require('../../test/supabaseMock')
       return makeQueryChain({ data: [], error: null })
     })
 
