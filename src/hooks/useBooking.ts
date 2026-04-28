@@ -11,7 +11,10 @@ interface UseBookingReturn {
 
 function getBookingErrorMessage(err: unknown) {
   const fallback = 'Booking failed'
-  const message = err instanceof Error ? err.message : fallback
+  const message =
+    err instanceof Error
+      ? err.message
+      : (err as { message?: string })?.message ?? fallback
   const normalized = message.toLowerCase()
 
   if (

@@ -1,5 +1,5 @@
 # LaylaBook v2
-LaylaBook is a React, TypeScript, and Supabase booking system for a salon workflow. It handles public appointment booking, dynamic availability, secure admin management, rescheduling, client profiles, and schedule controls.
+LaylaBook is a React, TypeScript, and Supabase booking system for a salon workflow. It handles public appointment booking, dynamic availability, secure admin management, rescheduling, client profiles, schedule controls, and automated email notifications.
 
 Built for a real salon use case with production-style scheduling logic and database-level validation.
 
@@ -16,8 +16,9 @@ The booking flow is designed to reflect how real appointments work:
 3. Optional add-ons can be added, changing the total duration
 4. The client picks a date
 5. Available time slots are fetched dynamically based on total duration
-6. The client selects a time and enters their name and phone number
+6. The client selects a time and enters their name, email address, and phone number
 7. A booking is created via the Supabase RPC function `create_booking`
+8. A confirmation email is sent to the client via Resend
 
 When a booking is created, the database:
 
@@ -27,7 +28,25 @@ When a booking is created, the database:
 * Stores a snapshot of selected services in `booking_services`
 * Returns the booking ID to the frontend
 
+After the booking is created, the frontend calls `save_booking_email` to store the email on the client profile, then invokes the `send-booking-confirmation` edge function to dispatch the confirmation email. Both calls are fire-and-forget and do not block the success screen.
+
 A key detail is that changing add-ons automatically recalculates availability, since longer appointments reduce the number of valid time slots.
+
+---
+
+## Email Notifications
+
+The system sends two types of automated emails via [Resend](https://resend.com), handled by Supabase edge functions.
+
+### Booking confirmation
+
+Triggered immediately after `create_booking` succeeds. The `send-booking-confirmation` edge function receives the booking details from the frontend and sends an HTML email containing the appointment date, time, service, total price, and a note to text on arrival.
+
+### 24-hour reminders
+
+A pg_cron job runs daily at 09:00 UTC and calls the `send-booking-reminder` edge function. The function queries `get_tomorrows_reminders()` using the service role key, which returns all confirmed bookings where the appointment date is tomorrow (evaluated in `Europe/Dublin` timezone) and the client has an email address on file. A reminder email is sent to each client with the same appointment details plus the salon address.
+
+The cron job authenticates to the edge function using a shared `CRON_SECRET` embedded in the pg_cron command at setup time. Failed sends are logged individually and do not prevent other reminders from going out.
 
 ---
 
@@ -37,7 +56,7 @@ The system is driven by a small set of focused tables:
 
 * **bookings** - stores appointment times, client details, status, total price, and optional `client_id`
 * **booking_services** - stores a snapshot of service names, prices, and primary/add-on status at the time of booking
-* **clients** - stores client profiles by unique phone number, with editable admin notes
+* **clients** - stores client profiles by unique phone number, with an optional email address and editable admin notes
 * **services** - defines available services, durations, prices, categories, add-ons, and active state
 * **working_hours** - defines the recurring weekly schedule
 * **blocked_dates** - stores one-off closures, holidays, and days off
@@ -103,12 +122,13 @@ The booking status is preserved during rescheduling.
 
 Client profiles are created automatically during booking.
 
-The `clients` table uses phone number as the unique identifier. When a booking is created, `upsert_client` either creates a new client or updates the existing client's name.
+The `clients` table uses phone number as the unique identifier. When a booking is created, `upsert_client` either creates a new client or updates the existing client's name. After booking, the client's email is stored via `save_booking_email`, which updates the clients row matched by phone number.
 
 The admin Clients tab shows:
 
 * Client name
 * Phone number
+* Email address (shown as a mailto link when present)
 * Number of bookings
 * Last booking date
 * Editable private notes
@@ -161,10 +181,23 @@ The backend uses Supabase RPC functions as the source of truth for booking logic
 * **get_available_slots** - generates public booking availability
 * **create_booking** - validates and creates new bookings
 * **upsert_client** - creates or updates client profiles by phone number
+* **save_booking_email** - stores a client's email address matched by phone number
 * **get_reschedule_available_slots** - generates admin reschedule availability while excluding the current booking
 * **reschedule_booking** - validates conflicts and updates booking times
+* **get_tomorrows_reminders** - returns confirmed bookings for tomorrow (Dublin timezone) with client email, used by the reminder edge function
 
 This keeps important business logic in the database rather than relying only on frontend checks.
+
+---
+
+## Edge Functions
+
+Two Supabase edge functions handle outbound email via Resend:
+
+* **send-booking-confirmation** - called by the frontend after a booking is created; sends an HTML confirmation email with appointment details
+* **send-booking-reminder** - called daily by pg_cron; queries `get_tomorrows_reminders()` and sends a reminder email to each client with a confirmed appointment the following day
+
+Both functions use the `RESEND_API_KEY` and `RESEND_FROM_EMAIL` secrets. The reminder function additionally uses `CRON_SECRET` for authentication and `SUPABASE_SERVICE_ROLE_KEY` (automatically injected) to query the database.
 
 ---
 
@@ -206,6 +239,12 @@ Some of the main decisions behind this system:
 * **Phone-based client profiles**
   Simple and practical for a solo salon workflow.
 
+* **Fire-and-forget email dispatch**
+  Confirmation and reminder emails are non-blocking — a failed email send never affects the booking itself.
+
+* **Database-driven reminders**
+  The pg_cron job calls an edge function that queries the database directly, so reminder logic stays consistent with the same timezone and status rules used everywhere else.
+
 * **Focused admin dashboard**
   The admin UI is optimized for scanning, quick actions, and repeated daily use.
 
@@ -220,8 +259,12 @@ Some of the main decisions behind this system:
 * Supabase Auth
 * Supabase Postgres
 * Supabase RPC functions
+* Supabase Edge Functions (Deno)
 * Row Level Security
+* pg_cron + pg_net
+* Resend
 * date-fns
+* Vitest + Testing Library
 
 ---
 
@@ -230,7 +273,6 @@ Some of the main decisions behind this system:
 Potential future improvements include:
 
 * Multi-staff or stylist support
-* SMS or email confirmations and reminders
 * Waitlist and cancellation handling
 * Client self-service cancellation or rescheduling
 * Deposits or online payments
@@ -240,4 +282,4 @@ Potential future improvements include:
 
 ## What I Learned
 
-Building this project helped me understand how to design real-world scheduling systems, handle availability and conflicts correctly, use Supabase RPC functions for backend logic, secure a frontend app with Supabase Auth and RLS, model bookings and client profiles and balance polished admin UX with reliable database constraints.
+Building this project helped me understand how to design real-world scheduling systems, handle availability and conflicts correctly, use Supabase RPC functions for backend logic, secure a frontend app with Supabase Auth and RLS, model bookings and client profiles, automate transactional email with edge functions and pg_cron, and balance polished admin UX with reliable database constraints.
