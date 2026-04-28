@@ -222,9 +222,10 @@ Deno.serve(async (req: Request) => {
     return new Response('ok', { status: 200 })
   }
 
-  // Verify the shared secret — this function is never called from the browser.
-  const authHeader = req.headers.get('Authorization') ?? ''
-  const token = authHeader.replace(/^Bearer\s+/i, '')
+  // Verify the shared secret passed by pg_cron.
+  // Authorization header is not used — Supabase's JWT gateway would reject a
+  // non-JWT value before the function runs. X-Cron-Secret bypasses the gateway.
+  const token = req.headers.get('X-Cron-Secret') ?? ''
   if (!CRON_SECRET || token !== CRON_SECRET) {
     return new Response(JSON.stringify({ error: 'Unauthorized' }), {
       status: 401,

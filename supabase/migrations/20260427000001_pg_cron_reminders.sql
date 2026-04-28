@@ -71,7 +71,7 @@ BEGIN
   PERFORM cron.schedule(
     'send-booking-reminders',
     '0 9 * * *',
-    'SELECT net.http_post(url := ''https://mmrlwzxsgjtdmkmmlwqo.supabase.co/functions/v1/send-booking-reminder'', headers := jsonb_build_object(''Content-Type'', ''application/json'', ''Authorization'', ''Bearer ' || v_secret || '''), body := ''{}''::jsonb);'
+    'SELECT net.http_post(url := ''https://mmrlwzxsgjtdmkmmlwqo.supabase.co/functions/v1/send-booking-reminder'', headers := jsonb_build_object(''Content-Type'', ''application/json'', ''X-Cron-Secret'', ''' || v_secret || '''), body := ''{}''::jsonb);'
   );
 
   RAISE NOTICE 'pg_cron job "send-booking-reminders" scheduled at 09:00 UTC daily.';
