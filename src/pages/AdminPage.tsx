@@ -18,12 +18,13 @@ import {
 } from 'date-fns'
 import DatePicker from '../components/booking/DatePicker'
 import TimeGrid from '../components/booking/TimeGrid'
+import AdminWaitlistView from './AdminWaitlistView'
 import { useBlockedDates } from '../hooks/useBlockedDates'
 import { useWorkingHours } from '../hooks/useWorkingHours'
 import { getLocalToday } from '../utils/time'
 import type { BlockedDate, Booking, WorkingHours } from '../types'
 
-type AdminView = 'today' | 'week' | 'month' | 'list' | 'settings' | 'clients'
+type AdminView = 'today' | 'week' | 'month' | 'list' | 'settings' | 'clients' | 'waitlist'
 type StatusFilter = 'all' | Booking['status']
 type ClientBooking = Pick<
   Booking,
@@ -49,6 +50,7 @@ const viewTabs: { value: AdminView; label: string }[] = [
   { value: 'list', label: 'List' },
   { value: 'settings', label: 'Settings' },
   { value: 'clients', label: 'Clients' },
+  { value: 'waitlist', label: 'Waitlist' },
 ]
 
 const statusFilters: { value: StatusFilter; label: string }[] = [
@@ -618,6 +620,8 @@ export default function AdminPage() {
             <SettingsView />
           ) : view === 'clients' ? (
             <ClientsView onSaved={(message) => setSuccessMessage(message)} />
+          ) : view === 'waitlist' ? (
+            <AdminWaitlistView onSaved={(message) => setSuccessMessage(message)} />
           ) : loading ? (
             <div className="grid gap-3">
               {[1, 2, 3].map((item) => (

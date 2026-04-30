@@ -2,3 +2,6 @@ project_id = "mmrlwzxsgjtdmkmmlwqo"
 
 [functions.send-booking-reminder]
 verify_jwt = false
+
+[functions.send-waitlist-notification]
+verify_jwt = false

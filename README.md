@@ -34,4 +34,17 @@ End-to-end booking platform with a public booking flow, secure admin dashboard, 
 
 ---
 
+## Waitlist & Auto-Fill
+
+Cancellations don't waste slots: clients can join a waitlist for a busy day, and when a booking is cancelled the freed slot is offered automatically to the next eligible person in FIFO order.
+
+- **Customer flow** — `WaitlistJoinForm` collects name, phone, email, and a time window when no slot fits; the offered claimant gets an email with a one-time link to `ClaimPage`, which shows a live 15-minute countdown and a single "Claim this slot" action — expiry cascades to the next FIFO match.
+- **Database** — `waitlist` table, `waitlist_with_position` FIFO view, `on_booking_cancelled` trigger, and a `process_waitlist_expirations` job run every minute by `pg_cron` to expire stale offers and cascade.
+- **Email dispatch** — `send-waitlist-notification` edge function, invoked from `pg_net` with the offered slot details and a one-time `claim_token` link.
+- **Admin surface** — Waitlist tab in the dashboard lists current entries grouped by date, shows a live "Notified · Xm left" pill, and removes entries via `admin_remove_waitlist_entry`.
+- **Setup** — requires a `CRON_SECRET` shared between the edge function and `pg_cron`; full rotation procedure is documented in the header of `supabase/migrations/20260429000002_waitlist_cron.sql`.
+- **Known limitations** — email-only (no SMS), slots starting within 60 minutes are skipped to leave headroom for the claim window and delivery, and the admin `Refresh` button doesn't yet refetch the waitlist tab.
+
+---
+
 **GitHub:** [github.com/CianDonegan/laylabookv2](https://github.com/CianDonegan/laylabookv2)

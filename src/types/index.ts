@@ -63,3 +63,45 @@ export interface BookingPayload {
     name: string
   }[]
 }
+
+export type WaitlistStatus =
+  | 'pending'
+  | 'notified'
+  | 'expired'
+  | 'claimed'
+  | 'cancelled'
+
+export interface WaitlistPayload {
+  name: string
+  phone: string
+  email: string
+  serviceId: string
+  addonServiceIds: string[]
+  preferredDate: string  // YYYY-MM-DD
+  earliestTime: string   // HH:MM (24h)
+  latestTime: string     // HH:MM (24h)
+}
+
+export interface WaitlistPosition {
+  position: number
+  aheadCount: number
+  status: WaitlistStatus
+}
+
+export interface ClaimOfferService {
+  service_id: string
+  name: string
+  price: number
+  is_primary: boolean
+}
+
+export interface ClaimOffer {
+  waitlistId: string
+  clientName: string
+  status: WaitlistStatus
+  offeredStartTime: string
+  offeredEndTime: string
+  expiresAt: string
+  totalPrice: number
+  services: ClaimOfferService[]
+}
